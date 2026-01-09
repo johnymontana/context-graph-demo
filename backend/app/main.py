@@ -4,11 +4,20 @@ Provides REST API endpoints for the frontend and agent interactions.
 """
 
 import json
+import logging
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
@@ -95,6 +104,7 @@ async def chat(request: ChatRequest):
     Agent has access to context graph tools.
     """
     session_id = request.session_id or str(uuid.uuid4())
+    logger.info(f"Chat request received: {request.message[:100]}...")
 
     try:
         # Convert conversation history to list of dicts
@@ -102,8 +112,11 @@ async def chat(request: ChatRequest):
             {"role": msg.role, "content": msg.content} for msg in request.conversation_history
         ]
 
+        logger.info("Creating ContextGraphAgent...")
         async with ContextGraphAgent() as agent:
+            logger.info("Agent connected, sending query...")
             result = await agent.query(request.message, conversation_history=history)
+            logger.info("Query completed successfully")
 
             return ChatResponse(
                 response=result["response"],
@@ -112,6 +125,7 @@ async def chat(request: ChatRequest):
                 decisions_made=result.get("decisions_made", []),
             )
     except Exception as e:
+        logger.error(f"Chat error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -122,6 +136,7 @@ async def chat_stream(request: ChatRequest):
     Returns Server-Sent Events (SSE) for real-time streaming.
     """
     session_id = request.session_id or str(uuid.uuid4())
+    logger.info(f"Stream chat request received: {request.message[:100]}...")
 
     async def event_generator():
         try:
@@ -130,7 +145,9 @@ async def chat_stream(request: ChatRequest):
                 {"role": msg.role, "content": msg.content} for msg in request.conversation_history
             ]
 
+            logger.info("Creating ContextGraphAgent for streaming...")
             async with ContextGraphAgent() as agent:
+                logger.info("Agent connected, starting stream...")
                 async for event in agent.query_stream(
                     request.message, conversation_history=history
                 ):
@@ -146,6 +163,7 @@ async def chat_stream(request: ChatRequest):
                             "data": json.dumps({"content": event["content"]}),
                         }
                     elif event["type"] == "tool_use":
+                        logger.info(f"Tool use: {event['name']}")
                         yield {
                             "event": "tool_use",
                             "data": json.dumps(
@@ -156,6 +174,7 @@ async def chat_stream(request: ChatRequest):
                             ),
                         }
                     elif event["type"] == "tool_result":
+                        logger.info(f"Tool result: {event['name']}")
                         yield {
                             "event": "tool_result",
                             "data": json.dumps(
@@ -166,6 +185,7 @@ async def chat_stream(request: ChatRequest):
                             ),
                         }
                     elif event["type"] == "done":
+                        logger.info("Stream completed successfully")
                         yield {
                             "event": "done",
                             "data": json.dumps(
@@ -178,6 +198,7 @@ async def chat_stream(request: ChatRequest):
                         }
 
         except Exception as e:
+            logger.error(f"Stream error: {traceback.format_exc()}")
             yield {
                 "event": "error",
                 "data": json.dumps({"error": str(e)}),
