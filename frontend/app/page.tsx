@@ -158,7 +158,7 @@ export default function Home() {
           </GridItem>
 
           {/* Graph Visualization */}
-          <GridItem display={{ base: "none", xl: "block" }} overflow="hidden">
+          <GridItem overflow="hidden">
             <Box
               bg="bg.surface"
               borderRadius="lg"
@@ -193,7 +193,7 @@ export default function Home() {
           </GridItem>
 
           {/* Decision Trace Panel */}
-          <GridItem overflow="hidden">
+          <GridItem display={{ base: "none", xl: "block" }} overflow="hidden">
             <Box
               bg="bg.surface"
               borderRadius="lg"
