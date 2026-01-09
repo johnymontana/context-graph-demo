@@ -370,22 +370,30 @@ export function ChatInterface({
               </Text>
               <VStack align="start" mt={3} gap={1}>
                 <SuggestionChip
-                  text="Search for customer John Smith"
-                  onClick={() => setInput("Search for customer John Smith")}
-                />
-                <SuggestionChip
-                  text="Should we approve a $50K credit increase for account #12345?"
+                  text="Should we approve a credit limit increase for Jessica Norris? She's requesting a $25,000 limit increase."
                   onClick={() =>
                     setInput(
-                      "Should we approve a $50K credit increase for account #12345?",
+                      "Should we approve a credit limit increase for Jessica Norris? She's requesting a $25,000 limit increase.",
                     )
                   }
                 />
                 <SuggestionChip
-                  text="Analyze fraud patterns for suspicious transactions"
+                  text="Search for customer John Walsh"
+                  onClick={() => setInput("Search for customer John Walsh")}
+                />
+                <SuggestionChip
+                  text="A customer wants to make a $15,000 wire transfer. What policies apply and are there similar past decisions?"
                   onClick={() =>
                     setInput(
-                      "Analyze fraud patterns for suspicious transactions",
+                      "A customer wants to make a $15,000 wire transfer. What policies apply and are there similar past decisions?",
+                    )
+                  }
+                />
+                <SuggestionChip
+                  text="We need to override the trading limit for Katherine Miller. Find precedents for similar exceptions."
+                  onClick={() =>
+                    setInput(
+                      "We need to override the trading limit for Katherine Miller. Find precedents for similar exceptions.",
                     )
                   }
                 />
