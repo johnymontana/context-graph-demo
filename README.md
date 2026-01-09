@@ -30,7 +30,7 @@ Visualize entities, decisions, and causal relationships.
 
 ### Decision Trace
 
-Inspect reasoning, precendents, and causal chains.
+Inspect reasoning, precedents, and causal chains.
 
 
 ## Demo Scenarios
@@ -81,7 +81,7 @@ This demo showcases three key differentiators of Neo4j for context graphs:
 ### 1. Data Model Fit
 Neo4j is the natural substrate for context graphs - entities, decisions, and causal relationships map directly to nodes and relationships.
 
-### 2. GDS Magic with FastRP
+### 2. Graph Data Science Algorithms
 Graph Data Science algorithms provide **structural/topological similarity** that's impossible on Postgres without a PhD in graph theory:
 - **FastRP**: 75,000x faster than node2vec, captures structural embeddings
 - **KNN**: Find k-nearest neighbors based on graph structure
@@ -98,7 +98,7 @@ Combine semantic similarity (text embeddings) with structural similarity (FastRP
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Next.js UI    │────▶│  FastAPI + SDK  │────▶│  Neo4j + GDS    │
 │  Chakra UI v3   │     │  Claude Agent   │     │  Vector Search  │
-│  NVL Graphs     │     │  9 MCP Tools    │     │  FastRP/KNN     │
+│  NVL Graphs     │     │  10 MCP Tools   │     │  FastRP/KNN     │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
@@ -213,16 +213,23 @@ NEO4J_PASSWORD=password
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
+| `POST /api/chat` | Chat with AI agent |
+| `POST /api/chat/stream` | Streaming chat with SSE |
 | `GET /api/customers/search?query=` | Search customers |
 | `GET /api/customers/{id}` | Get customer details |
 | `GET /api/customers/{id}/decisions` | Get customer decisions |
+| `GET /api/decisions` | List decisions |
 | `GET /api/decisions/{id}` | Get decision details |
+| `POST /api/decisions` | Create new decision |
 | `GET /api/decisions/{id}/similar` | Find similar decisions |
 | `GET /api/decisions/{id}/causal-chain` | Get causal chain |
 | `GET /api/graph` | Get graph visualization data |
+| `GET /api/graph/expand/{node_id}` | Expand node connections |
+| `POST /api/graph/relationships` | Get relationships between nodes |
+| `GET /api/graph/schema` | Get graph schema |
 | `GET /api/graph/statistics` | Get graph statistics |
 | `GET /api/policies` | List policies |
-| `POST /api/chat` | Chat with AI agent |
+| `GET /api/policies/{id}` | Get policy details |
 
 ## Project Structure
 
@@ -255,7 +262,7 @@ context-graph/
 
 ## Agent Tools (MCP)
 
-The Claude Agent has access to 9 custom tools:
+The Claude Agent has access to 10 custom tools:
 
 | Tool | Description |
 |------|-------------|
