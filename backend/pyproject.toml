@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "neo4j>=5.26.0",
+    "graphdatascience>=1.17",
     "claude-agent-sdk>=0.1.18",
     "openai>=1.58.0",
     "pydantic>=2.10.0",
