@@ -8,6 +8,7 @@ from typing import Any
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, create_sdk_mcp_server, tool
 
+from . import memory_client
 from .context_graph_client import context_graph_client
 from .gds_client import gds_client
 from .vector_client import vector_client
@@ -230,15 +231,27 @@ async def find_similar_decisions(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "find_precedents",
-    "Find precedent decisions that could inform the current decision. Uses both semantic similarity (meaning) and structural similarity (graph patterns).",
+    "Find precedent decisions that could inform the current decision. Uses both semantic similarity (meaning) and structural similarity (graph patterns). Searches both legacy decisions and reasoning traces.",
     {"scenario": str, "category": str, "limit": int},
 )
 async def find_precedents(args: dict[str, Any]) -> dict[str, Any]:
     """Find precedent decisions using hybrid search."""
     try:
+        # Search legacy decisions using vector client
         results = vector_client.find_precedents_hybrid(
             scenario=args["scenario"], category=args.get("category"), limit=args.get("limit", 5)
         )
+
+        # Also search reasoning traces using memory client
+        reasoning_traces = []
+        try:
+            reasoning_traces = await memory_client.get_similar_traces(
+                query=args["scenario"],
+                limit=args.get("limit", 5),
+            )
+        except Exception as e:
+            print(f"[WARNING] Failed to search reasoning traces: {e}")
+
         # Include graph data for the first precedent found
         graph_data = None
         if results and len(results) > 0:
@@ -248,6 +261,7 @@ async def find_precedents(args: dict[str, Any]) -> dict[str, Any]:
 
         response = {
             "precedents": results,
+            "reasoning_traces": reasoning_traces,
             "graph_data": graph_data,
         }
         return {"content": [{"type": "text", "text": json.dumps(response, indent=2, default=str)}]}
@@ -298,6 +312,7 @@ async def get_causal_chain(args: dict[str, Any]) -> dict[str, Any]:
         "risk_factors": list,
         "precedent_ids": list,
         "confidence_score": float,
+        "session_id": str,
     },
 )
 async def record_decision(args: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +325,7 @@ async def record_decision(args: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             pass  # Continue without embedding if it fails
 
+        # Record in the legacy context graph (for backward compatibility and graph viz)
         decision_id = context_graph_client.record_decision(
             decision_type=args["decision_type"],
             category=args["category"],
@@ -322,6 +338,46 @@ async def record_decision(args: dict[str, Any]) -> dict[str, Any]:
             reasoning_embedding=reasoning_embedding,
         )
 
+        # Also record as a reasoning trace in neo4j-agent-memory
+        trace_id = None
+        session_id = args.get("session_id")
+        if session_id:
+            try:
+                # Create a reasoning trace
+                task = f"{args['decision_type']} decision for {args['category']}"
+                trace_id = await memory_client.start_trace(
+                    session_id=session_id,
+                    task=task,
+                    metadata={
+                        "decision_type": args["decision_type"],
+                        "category": args["category"],
+                        "customer_id": args.get("customer_id"),
+                        "account_id": args.get("account_id"),
+                        "legacy_decision_id": decision_id,
+                    },
+                )
+
+                # Add the reasoning as a step
+                await memory_client.add_trace_step(
+                    trace_id=trace_id,
+                    step_type="analysis",
+                    content=args["reasoning"],
+                    metadata={
+                        "confidence_score": args.get("confidence_score", 0.8),
+                        "risk_factors": args.get("risk_factors", []),
+                    },
+                )
+
+                # Complete the trace
+                await memory_client.complete_trace(
+                    trace_id=trace_id,
+                    outcome=f"Decision recorded: {args['decision_type']}",
+                    success=True,
+                    metadata={"precedent_ids": args.get("precedent_ids", [])},
+                )
+            except Exception as e:
+                print(f"[WARNING] Failed to create reasoning trace: {e}")
+
         return {
             "content": [
                 {
@@ -330,6 +386,7 @@ async def record_decision(args: dict[str, Any]) -> dict[str, Any]:
                         {
                             "success": True,
                             "decision_id": decision_id,
+                            "trace_id": trace_id,
                             "message": f"Decision recorded successfully with ID {decision_id}",
                         },
                         indent=2,
@@ -513,6 +570,109 @@ async def get_schema(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ============================================
+# CONVERSATION MEMORY TOOLS
+# ============================================
+
+
+@tool(
+    "get_conversation_history",
+    "Get the conversation history for a session. Returns recent messages with role, content, and timestamps.",
+    {"session_id": str, "limit": int},
+)
+async def get_conversation_history(args: dict[str, Any]) -> dict[str, Any]:
+    """Get conversation history from memory."""
+    try:
+        messages = await memory_client.get_conversation(
+            session_id=args["session_id"],
+            limit=args.get("limit", 20),
+        )
+        return {"content": [{"type": "text", "text": json.dumps(messages, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error getting conversation: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+@tool(
+    "list_sessions",
+    "List recent conversation sessions with message counts and timestamps.",
+    {"limit": int},
+)
+async def list_sessions(args: dict[str, Any]) -> dict[str, Any]:
+    """List conversation sessions."""
+    try:
+        sessions = await memory_client.list_sessions(limit=args.get("limit", 20))
+        return {"content": [{"type": "text", "text": json.dumps(sessions, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error listing sessions: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+@tool(
+    "get_conversation_summary",
+    "Get an AI-generated summary of a conversation session.",
+    {"session_id": str},
+)
+async def get_conversation_summary(args: dict[str, Any]) -> dict[str, Any]:
+    """Get conversation summary."""
+    try:
+        summary = await memory_client.get_conversation_summary(session_id=args["session_id"])
+        return {
+            "content": [
+                {"type": "text", "text": json.dumps({"summary": summary}, indent=2, default=str)}
+            ]
+        }
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error getting summary: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+@tool(
+    "find_similar_reasoning_traces",
+    "Find past reasoning traces similar to the given query. Uses semantic search on trace tasks and outcomes.",
+    {"query": str, "limit": int},
+)
+async def find_similar_reasoning_traces(args: dict[str, Any]) -> dict[str, Any]:
+    """Find similar reasoning traces using memory client."""
+    try:
+        traces = await memory_client.get_similar_traces(
+            query=args["query"],
+            limit=args.get("limit", 5),
+        )
+        return {"content": [{"type": "text", "text": json.dumps(traces, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error finding traces: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+@tool(
+    "get_memory_context",
+    "Get combined context from conversation history, related entities, and similar traces for a query.",
+    {"query": str, "session_id": str},
+)
+async def get_memory_context(args: dict[str, Any]) -> dict[str, Any]:
+    """Get combined memory context."""
+    try:
+        context = await memory_client.get_context(
+            query=args["query"],
+            session_id=args.get("session_id"),
+        )
+        return {"content": [{"type": "text", "text": json.dumps(context, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error getting context: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+# ============================================
 # MCP SERVER CREATION
 # ============================================
 
@@ -523,6 +683,7 @@ def create_context_graph_server():
         name="context-graph",
         version="1.0.0",
         tools=[
+            # Graph operations
             search_customer,
             get_customer_decisions,
             find_similar_decisions,
@@ -534,6 +695,12 @@ def create_context_graph_server():
             get_policy,
             execute_cypher,
             get_schema,
+            # Memory operations
+            get_conversation_history,
+            list_sessions,
+            get_conversation_summary,
+            find_similar_reasoning_traces,
+            get_memory_context,
         ],
     )
 
@@ -546,6 +713,7 @@ def get_agent_options() -> ClaudeAgentOptions:
         system_prompt=CONTEXT_GRAPH_SYSTEM_PROMPT,
         mcp_servers={"graph": context_graph_server},
         allowed_tools=[
+            # Graph operations
             "mcp__graph__search_customer",
             "mcp__graph__get_customer_decisions",
             "mcp__graph__find_similar_decisions",
@@ -557,6 +725,12 @@ def get_agent_options() -> ClaudeAgentOptions:
             "mcp__graph__get_policy",
             "mcp__graph__execute_cypher",
             "mcp__graph__get_schema",
+            # Memory operations
+            "mcp__graph__get_conversation_history",
+            "mcp__graph__list_sessions",
+            "mcp__graph__get_conversation_summary",
+            "mcp__graph__find_similar_reasoning_traces",
+            "mcp__graph__get_memory_context",
         ],
     )
 
@@ -566,6 +740,7 @@ def get_agent_options() -> ClaudeAgentOptions:
 # ============================================
 
 AVAILABLE_TOOLS = [
+    # Graph operations
     "search_customer",
     "get_customer_decisions",
     "find_similar_decisions",
@@ -577,6 +752,12 @@ AVAILABLE_TOOLS = [
     "get_policy",
     "execute_cypher",
     "get_schema",
+    # Memory operations
+    "get_conversation_history",
+    "list_sessions",
+    "get_conversation_summary",
+    "find_similar_reasoning_traces",
+    "get_memory_context",
 ]
 
 
@@ -598,9 +779,10 @@ def get_agent_context() -> dict[str, Any]:
 class ContextGraphAgent:
     """Wrapper for managing Claude Agent SDK sessions."""
 
-    def __init__(self):
+    def __init__(self, session_id: str | None = None):
         self.options = get_agent_options()
         self.client: ClaudeSDKClient | None = None
+        self.session_id = session_id
 
     async def __aenter__(self):
         self.client = ClaudeSDKClient(options=self.options)
@@ -611,12 +793,49 @@ class ContextGraphAgent:
         if self.client:
             await self.client.disconnect()
 
+    async def _persist_message(self, role: str, content: str) -> None:
+        """Persist a message to short-term memory."""
+        if not self.session_id:
+            return
+        try:
+            await memory_client.add_message(
+                session_id=self.session_id,
+                role=role,
+                content=content,
+            )
+        except Exception as e:
+            # Log but don't fail the request if memory persistence fails
+            print(f"[WARNING] Failed to persist message to memory: {e}")
+
+    async def _get_persisted_history(self, limit: int = 10) -> list[dict[str, str]]:
+        """Get conversation history from memory."""
+        if not self.session_id:
+            return []
+        try:
+            messages = await memory_client.get_conversation(
+                session_id=self.session_id,
+                limit=limit,
+            )
+            return [{"role": m["role"], "content": m["content"]} for m in messages]
+        except Exception as e:
+            print(f"[WARNING] Failed to get conversation history from memory: {e}")
+            return []
+
     async def query(
         self, message: str, conversation_history: list[dict[str, str]] | None = None
     ) -> dict[str, Any]:
         """Send a query to the agent and get the response."""
         if not self.client:
             raise RuntimeError("Agent not connected. Use 'async with' context manager.")
+
+        # Persist the user message to memory
+        await self._persist_message("user", message)
+
+        # Try to get history from memory first, fall back to passed history
+        if self.session_id:
+            persisted_history = await self._get_persisted_history(limit=6)
+            if persisted_history:
+                conversation_history = persisted_history
 
         # Build message with conversation context
         if conversation_history and len(conversation_history) > 0:
@@ -661,6 +880,10 @@ Please respond to the current message, taking the conversation history into acco
                             # Will be populated when we get the result
                             pass
 
+        # Persist the assistant response to memory
+        if response_text:
+            await self._persist_message("assistant", response_text)
+
         return {
             "response": response_text,
             "tool_calls": tool_calls,
@@ -673,6 +896,15 @@ Please respond to the current message, taking the conversation history into acco
         """Send a query to the agent and stream the response."""
         if not self.client:
             raise RuntimeError("Agent not connected. Use 'async with' context manager.")
+
+        # Persist the user message to memory
+        await self._persist_message("user", message)
+
+        # Try to get history from memory first, fall back to passed history
+        if self.session_id:
+            persisted_history = await self._get_persisted_history(limit=6)
+            if persisted_history:
+                conversation_history = persisted_history
 
         # Build message with conversation context
         if conversation_history and len(conversation_history) > 0:
@@ -697,6 +929,7 @@ Please respond to the current message, taking the conversation history into acco
         tool_calls = []
         tool_id_to_name = {}  # Map tool_use_id to tool name
         decisions_made = []
+        full_response_text = []  # Collect response text for persistence
 
         async for msg in self.client.receive_response():
             msg_type = type(msg).__name__
@@ -754,6 +987,7 @@ Please respond to the current message, taking the conversation history into acco
                 for block in msg.content:
                     if hasattr(block, "text"):
                         # Stream text content
+                        full_response_text.append(block.text)
                         yield {"type": "text", "content": block.text}
                     elif hasattr(block, "name"):
                         # Tool use block
@@ -773,6 +1007,11 @@ Please respond to the current message, taking the conversation history into acco
                         # Track decisions made
                         if block.name == "mcp__graph__record_decision":
                             pass
+
+        # Persist the assistant response to memory
+        if full_response_text:
+            response_text = "".join(full_response_text)
+            await self._persist_message("assistant", response_text)
 
         # Final event with summary
         yield {
