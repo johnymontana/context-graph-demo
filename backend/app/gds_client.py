@@ -663,6 +663,130 @@ class GDSClient:
             record = result.single()
             return dict(record) if record else {}
 
+    # ============================================
+    # SIMILARITY RELATIONSHIPS & MULTI-HOP TRAVERSAL
+    # ============================================
+
+    def create_similar_to_relationships(
+        self, 
+        node_label: str = "Decision",
+        similarity_cutoff: float = 0.5,
+        top_k: int = 5
+    ) -> dict:
+        """
+        Create SIMILAR_TO relationships between nodes based on co-occurrence patterns.
+        Uses GDS Node Similarity algorithm to find similar nodes that appear in similar contexts.
+        
+        Args:
+            node_label: The node label to compute similarities for
+            similarity_cutoff: Minimum similarity score (0.0-1.0)
+            top_k: Maximum number of similar relationships per node
+            
+        Returns:
+            Dictionary with relationship count and status
+        """
+        with self.driver.session(database=self.database) as session:
+            try:
+                session.run("CALL gds.graph.drop('similarity-graph', false) YIELD graphName")
+            except:
+                pass
+
+            try:
+                session.run(f"""
+                    CALL gds.graph.project(
+                        'similarity-graph',
+                        ['{node_label}', 'Person', 'Account', 'Transaction', 'Organization'],
+                        ['ABOUT', 'OWNS', 'FROM_ACCOUNT', 'TO_ACCOUNT', 'WORKS_FOR']
+                    )
+                """)
+                
+                result = session.run(f"""
+                    CALL gds.nodeSimilarity.write('similarity-graph', {{
+                        writeRelationshipType: 'SIMILAR_TO',
+                        writeProperty: 'score',
+                        similarityCutoff: $similarity_cutoff,
+                        topK: $top_k,
+                        nodeLabels: ['{node_label}']
+                    }})
+                    YIELD nodesCompared, relationshipsWritten
+                    RETURN nodesCompared, relationshipsWritten
+                """, {"similarity_cutoff": similarity_cutoff, "top_k": top_k})
+                
+                record = result.single()
+                
+                session.run("CALL gds.graph.drop('similarity-graph', false) YIELD graphName")
+                
+                return {
+                    "status": "success",
+                    "nodes_compared": record["nodesCompared"],
+                    "relationships_written": record["relationshipsWritten"],
+                    "similarity_cutoff": similarity_cutoff,
+                    "top_k": top_k
+                }
+                
+            except Exception as e:
+                try:
+                    session.run("CALL gds.graph.drop('similarity-graph', false) YIELD graphName")
+                except:
+                    pass
+                return {
+                    "status": "error",
+                    "error": str(e)
+                }
+
+    def find_related_entities(
+        self,
+        entity_id: str,
+        hops: int = 2,
+        include_similar: bool = True,
+        limit: int = 50
+    ) -> dict:
+        """
+        Find related entities using multi-hop graph traversal.
+        Optionally includes SIMILAR_TO relationships for richer context.
+        
+        Args:
+            entity_id: Starting entity ID
+            hops: Number of hops to traverse (1-3 recommended)
+            include_similar: Whether to include SIMILAR_TO relationships
+            limit: Maximum number of entities to return
+            
+        Returns:
+            Dictionary with nodes and relationships
+        """
+        relationship_filter = "*" if include_similar else "*"
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(f"""
+                MATCH path = (start)-[{relationship_filter}*1..{hops}]-(related)
+                WHERE start.id = $entity_id OR id(start) = toInteger($entity_id)
+                WITH nodes(path) as pathNodes, relationships(path) as pathRels
+                UNWIND pathNodes as node
+                WITH COLLECT(DISTINCT {{
+                    id: COALESCE(node.id, toString(id(node))),
+                    labels: labels(node),
+                    properties: properties(node)
+                }}) as nodes,
+                pathRels
+                UNWIND pathRels as rel
+                WITH nodes, COLLECT(DISTINCT {{
+                    source: COALESCE(startNode(rel).id, toString(id(startNode(rel)))),
+                    target: COALESCE(endNode(rel).id, toString(id(endNode(rel)))),
+                    type: type(rel),
+                    properties: properties(rel)
+                }}) as relationships
+                RETURN nodes[0..$limit] as nodes, relationships[0..$limit] as relationships
+            """, {"entity_id": entity_id, "limit": limit})
+            
+            if not result or not result.records:
+                return {"nodes": [], "relationships": []}
+                
+            record = result.single()
+            return {
+                "nodes": record["nodes"] or [],
+                "relationships": record["relationships"] or []
+            }
+
 
 # Singleton instance
 gds_client = GDSClient()

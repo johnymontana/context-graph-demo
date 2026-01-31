@@ -1,6 +1,6 @@
-# Context Graph Demo
+# Lenny's Memory - Neo4j Agent Memory Demo
 
-A demonstration project showing how to build and use **Context Graphs** with Neo4j for AI-powered decision tracing in financial institutions.
+**Lenny's Memory** is the official demo application for [Neo4j Agent Memory](https://github.com/neo4j-labs/agent-memory), showcasing how to build **Context Graphs** with Neo4j for AI-powered decision tracing in financial institutions.
 
 ![Architecture Diagram](img/arch_diagram.png)
 
@@ -18,19 +18,15 @@ Key concepts:
 
 ![Graph Data Model](img/graph_data_model.png)
 
-### AI Assistant
+### Mobile-First Agent Chat Interface
 
-Ask questions about customers, decisions, and policies.
+Modern chat interface with embedded graph visualizations. Each tool result displays an interactive subgraph showing exactly which entities and relationships were used to answer your question.
 
-
-### Context Graph
-
-Visualize entities, decisions, and causal relationships.
-
-
-### Decision Trace
-
-Inspect reasoning, precedents, and causal chains.
+**Key Features:**
+- **Tool Result Cards**: Every agent tool call renders as a card with embedded graph visualization
+- **Responsive Design**: Works seamlessly on phones, tablets, and desktop (375px to 1920px+)
+- **Always-Visible Tools**: Sidebar drawer with all 12 available tools
+- **Data Model Context**: See which node types and relationships were traversed for each query
 
 
 ## Demo Scenarios
@@ -100,9 +96,17 @@ Combine semantic similarity (text embeddings) with structural similarity (FastRP
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │   Next.js UI    │────▶│  FastAPI + SDK  │────▶│  Neo4j + GDS    │
 │  Chakra UI v3   │     │  Claude Agent   │     │  Vector Search  │
-│  NVL Graphs     │     │  10 MCP Tools   │     │  FastRP/KNN     │
+│  Mobile-First   │     │  12 MCP Tools   │     │  FastRP/KNN     │
+│  Tool Cards     │     │  Graph Data     │     │  Node Similarity│
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
+
+**New in v2.0:**
+- **Mobile-first single-column layout** - removed 3-column grid for better mobile UX
+- **Tool result cards** - embedded NVL graph visualizations for every tool call
+- **Neo4j Needle branding** - Baltic Sea Blue (#018BFF), Public Sans typography
+- **Multi-hop traversal** - new `find_related_context` tool with 2-3 hop queries
+- **SIMILAR_TO relationships** - GDS Node Similarity for richer context discovery
 
 ## Prerequisites
 
@@ -248,13 +252,17 @@ context-graph/
 │   └── scripts/
 │       └── generate_sample_data.py
 ├── frontend/
-│   ├── app/                     # Next.js pages
+│   ├── app/                     # Next.js pages (mobile-first layout)
 │   ├── components/
-│   │   ├── ChatInterface.tsx    # AI chat with inline graphs
+│   │   ├── ChatInterface.tsx    # 🆕 Redesigned chat with avatars
+│   │   ├── ToolResultCard.tsx   # 🆕 Tool results with embedded graphs
+│   │   ├── ToolsSidebar.tsx     # 🆕 Always-visible tools drawer
+│   │   ├── DataModelBadge.tsx   # 🆕 Schema context for queries
 │   │   ├── ContextGraphView.tsx # NVL visualization
 │   │   └── DecisionTracePanel.tsx
 │   └── lib/
-│       └── api.ts               # API client
+│       ├── api.ts               # API client
+│       └── system.ts            # 🆕 Neo4j Needle theme
 ├── cypher/
 │   ├── schema.cypher            # Neo4j schema
 │   └── gds_projections.cypher   # GDS algorithms
@@ -264,20 +272,24 @@ context-graph/
 
 ## Agent Tools (MCP)
 
-The Claude Agent has access to 10 custom tools:
+The Claude Agent has access to 12 custom tools (via MCP):
 
-| Tool | Description |
-|------|-------------|
-| `search_customer` | Search customers by name, email, account number |
-| `get_customer_decisions` | Get all decisions about a customer |
-| `find_similar_decisions` | FastRP-based structural similarity search |
-| `find_precedents` | Semantic + structural precedent search |
-| `get_causal_chain` | Trace causes and effects of a decision |
-| `record_decision` | Create new decision trace with reasoning |
-| `detect_fraud_patterns` | Graph-based fraud analysis |
-| `get_policy` | Get current policy rules |
-| `execute_cypher` | Read-only Cypher for custom analysis |
-| `get_schema` | Retrieve the current Neo4j schema |
+| Tool | Description | Graph Output |
+|------|-------------|--------------|
+| `search_customer` | Search customers by name, email, account number | ✅ Customer + 1-hop relationships |
+| `get_customer_decisions` | Get all decisions about a customer | ✅ Customer + decision network |
+| `find_similar_decisions` | FastRP-based structural similarity search | ✅ Decision + similar decisions |
+| `find_precedents` | Semantic + structural precedent search | ✅ Precedent chain subgraph |
+| `get_causal_chain` | Trace causes and effects of a decision | ✅ Causal flow visualization |
+| `record_decision` | Create new decision trace with reasoning | ✅ New decision node created |
+| `detect_fraud_patterns` | Graph-based fraud analysis | ✅ Fraud pattern network |
+| `find_decision_community` | Louvain community detection | ✅ Community cluster graph |
+| `get_policy` | Get current policy rules | - |
+| `find_related_context` | 🆕 Multi-hop (2-3 hop) context discovery | ✅ Extended context subgraph |
+| `execute_cypher` | Read-only Cypher for custom analysis | - |
+| `get_schema` | Retrieve the current Neo4j schema | - |
+
+**New Tool:** `find_related_context` enables richer context discovery through multi-hop graph traversal, optionally including SIMILAR_TO relationships generated via GDS Node Similarity.
 
 ## Neo4j Data Model
 
@@ -327,11 +339,32 @@ RETURN similar, (semantic_score + structural_score) / 2 AS combined_score
 ORDER BY combined_score DESC
 ```
 
+## What's New in v2.0
+
+### User Experience
+- ✅ **Mobile-first responsive design** - works flawlessly on phones (375px+), tablets, and desktop
+- ✅ **Tool result cards** - every tool call shows an embedded NVL graph with the subgraph used
+- ✅ **Modern chat UI** - avatars, improved message bubbles, collapsible tool results
+- ✅ **Always-visible tools** - sidebar drawer with all 12 tools and their parameters
+- ✅ **Data model transparency** - see which node types and relationships were traversed
+
+### Backend Enhancements
+- ✅ **Multi-hop traversal** - new `find_related_context` tool with 2-3 hop queries
+- ✅ **SIMILAR_TO relationships** - GDS Node Similarity creates co-occurrence relationships
+- ✅ **Richer context** - all tools return graph_data for visualization
+
+### Design System
+- ✅ **Neo4j Needle branding** - Baltic Sea Blue (#018BFF), nature-inspired green (#10B860)
+- ✅ **Public Sans typography** - Neo4j's official typeface
+- ✅ **Semantic tokens** - consistent light/dark mode support
+
 ## References
 
+- [Neo4j Agent Memory Package](https://github.com/neo4j-labs/agent-memory) - Official Python package
+- [Lenny's Memory Blog Post](https://medium.com/neo4j/meet-lennys-memory-building-context-graphs-for-ai-agents-24cb102fb91a) - Announcement
 - [AI's Trillion-Dollar Opportunity: Context Graphs](https://foundationcapital.com/context-graphs-ais-trillion-dollar-opportunity/) - Foundation Capital
-- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)
-- [NVL Visualization Library](https://neo4j.com/docs/nvl/)
+- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) - Anthropic
+- [NVL Visualization Library](https://neo4j.com/docs/nvl/) - Neo4j
 
 ## License
 

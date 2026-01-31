@@ -474,6 +474,67 @@ async def get_policy(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "find_related_context",
+    "Find related entities and context around a specific entity using multi-hop graph traversal. This provides richer context by traversing 2-3 hops through the graph, optionally including SIMILAR_TO relationships for enhanced context discovery.",
+    {"entity_id": str, "hops": int, "include_similar": bool, "limit": int},
+)
+async def find_related_context(args: dict[str, Any]) -> dict[str, Any]:
+    """Find related context using multi-hop graph traversal."""
+    try:
+        entity_id = args["entity_id"]
+        hops = args.get("hops", 2)
+        include_similar = args.get("include_similar", True)
+        limit = args.get("limit", 50)
+        
+        result = gds_client.find_related_entities(
+            entity_id=entity_id,
+            hops=hops,
+            include_similar=include_similar,
+            limit=limit
+        )
+        
+        nodes = result.get("nodes", [])
+        relationships = result.get("relationships", [])
+        
+        # Build graph_data structure
+        graph_data = {
+            "nodes": [
+                {
+                    "id": node["id"],
+                    "labels": node["labels"],
+                    "properties": slim_properties(node["properties"]),
+                }
+                for node in nodes
+            ],
+            "relationships": [
+                {
+                    "source": rel["source"],
+                    "target": rel["target"],
+                    "type": rel["type"],
+                    "properties": slim_properties(rel.get("properties", {})),
+                }
+                for rel in relationships
+            ],
+        }
+        
+        response = {
+            "entity_id": entity_id,
+            "hops": hops,
+            "include_similar": include_similar,
+            "total_nodes": len(nodes),
+            "total_relationships": len(relationships),
+            "graph_data": graph_data,
+        }
+        
+        return {"content": [{"type": "text", "text": json.dumps(response, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error finding related context: {str(e)}"}],
+            "is_error": True,
+        }
+
+
+@tool(
     "execute_cypher",
     "Execute a read-only Cypher query against the context graph for custom analysis. Only SELECT/MATCH queries are allowed.",
     {"cypher": str},
@@ -532,6 +593,7 @@ def create_context_graph_server():
             detect_fraud_patterns,
             find_decision_community,
             get_policy,
+            find_related_context,
             execute_cypher,
             get_schema,
         ],
@@ -555,6 +617,7 @@ def get_agent_options() -> ClaudeAgentOptions:
             "mcp__graph__detect_fraud_patterns",
             "mcp__graph__find_decision_community",
             "mcp__graph__get_policy",
+            "mcp__graph__find_related_context",
             "mcp__graph__execute_cypher",
             "mcp__graph__get_schema",
         ],
@@ -575,6 +638,7 @@ AVAILABLE_TOOLS = [
     "detect_fraud_patterns",
     "find_decision_community",
     "get_policy",
+    "find_related_context",
     "execute_cypher",
     "get_schema",
 ]

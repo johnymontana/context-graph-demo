@@ -1,6 +1,15 @@
-# Context Graph Demo Examples
+# Lenny's Memory - Demo Examples
 
-These examples showcase the key features of the Context Graph application, demonstrating how AI agents can leverage graph-based decision tracing for financial institutions.
+These examples showcase the key features of **Lenny's Memory**, the official demo application for Neo4j Agent Memory. Each example demonstrates how AI agents can leverage graph-based decision tracing for financial institutions.
+
+## Using the Mobile-First Interface
+
+**Lenny's Memory** features a modern, mobile-first chat interface where:
+- **Tool results appear as cards** below the assistant's message
+- **Each card contains an embedded graph** showing the exact subgraph used to answer your question
+- **Click the graph tab** to see the full interactive visualization
+- **Expand/collapse cards** to focus on what matters
+- **Tap the Tools button** in the header to see all 12 available tools
 
 ---
 
@@ -13,10 +22,11 @@ Valerie Howard has multiple flagged transactions on her checking account. Analyz
 ```
 
 **What this demonstrates:**
-- Customer search populates the graph with account relationships
-- Fraud detection tool uses GDS Node Similarity to find structurally similar accounts
-- Graph shows connections between customer, accounts, and transactions
-- Flagged transactions are highlighted
+- Customer search populates a tool result card with account relationships graph
+- Fraud detection tool card shows suspicious network patterns via embedded NVL visualization
+- Each tool result (search, fraud detection) appears as a separate card with its own subgraph
+- You can see exactly which nodes and relationships the agent used to make its determination
+- Flagged transactions are highlighted in the graph visualization
 
 **Alternative:**
 ```
@@ -137,13 +147,15 @@ This single message will:
 
 ### Key Points to Highlight
 
-1. **Graph Visualization**: Double-click nodes to expand and explore relationships
-2. **Decision Trace Panel**: Click any Decision node to see similar decisions and causal chains
-3. **Community Detection**: Related decisions are grouped into communities (visible as Community nodes)
-4. **Multiple Similarity Methods**:
+1. **Tool Result Cards**: Each agent tool call appears as a card with tabs (Graph | Summary | Input | Output)
+2. **Embedded Graphs**: Every card shows the exact subgraph used - no more disconnected nodes!
+3. **Mobile-Optimized**: The interface works perfectly on phones, tablets, and desktop
+4. **Data Model Transparency**: Hover over the info badge to see which node types and relationships were traversed
+5. **Multiple Similarity Methods**:
    - Semantic (text embeddings) - for finding decisions with similar reasoning
    - Structural (FastRP + KNN) - for finding decisions with similar graph patterns
    - Community (Louvain) - for finding decisions in the same cluster
+   - Multi-hop (new!) - traverse 2-3 hops including SIMILAR_TO relationships
 
 ### Data Highlights
 
