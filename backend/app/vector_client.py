@@ -284,43 +284,6 @@ class VectorClient:
             )
             return result.single() is not None
 
-    def batch_update_decision_embeddings(
-        self,
-        limit: int = 100,
-    ) -> int:
-        """Generate embeddings for decisions that don't have them."""
-        with self.driver.session(database=self.database) as session:
-            # Get decisions without embeddings
-            result = session.run(
-                """
-                MATCH (d:Decision)
-                WHERE d.reasoning_embedding IS NULL AND d.reasoning IS NOT NULL
-                RETURN d.id AS id, d.reasoning AS reasoning
-                LIMIT $limit
-                """,
-                {"limit": limit},
-            )
-            decisions = [dict(record) for record in result]
-
-            if not decisions:
-                return 0
-
-            # Generate embeddings in batch
-            texts = [d["reasoning"] for d in decisions]
-            embeddings = self.generate_embeddings_batch(texts)
-
-            # Update each decision
-            for decision, embedding in zip(decisions, embeddings):
-                session.run(
-                    """
-                    MATCH (d:Decision {id: $decision_id})
-                    SET d.reasoning_embedding = $embedding
-                    """,
-                    {"decision_id": decision["id"], "embedding": embedding},
-                )
-
-            return len(decisions)
-
 
 # Singleton instance
 vector_client = VectorClient()

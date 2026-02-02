@@ -555,8 +555,8 @@ class ContextGraphClient:
                     """
                     MATCH (center)
                     WHERE center.id = $center_id OR elementId(center) = $center_id
-                    OPTIONAL MATCH (center)-[r1]-(n1)
-                    OPTIONAL MATCH (n1)-[r2]-(n2) WHERE n2 <> center
+                    OPTIONAL MATCH (center)-[r1:!HAS_SIMILAR_FACTORS&!BELONGS_TO_DECISION_COMMUNITY&!BELONGS_TO_ACCOUNT_COMMUNITY]-(n1)
+                    OPTIONAL MATCH (n1)-[r2:!HAS_SIMILAR_FACTORS&!BELONGS_TO_DECISION_COMMUNITY&!BELONGS_TO_ACCOUNT_COMMUNITY]-(n2) WHERE n2 <> center
                     WITH center,
                          collect(DISTINCT n1) + collect(DISTINCT n2) AS connectedNodes,
                          collect(DISTINCT r1) + collect(DISTINCT r2) AS allRels

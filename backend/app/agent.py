@@ -18,7 +18,7 @@ def slim_properties(props: dict) -> dict:
     slim = {}
     for key, value in props.items():
         # Skip embedding vectors
-        if key in ("fastrp_embedding", "reasoning_embedding", "embedding"):
+        if key in ("fast_rp_embedding", "reasoning_embedding", "embedding"):
             continue
         # Truncate long strings
         if isinstance(value, str) and len(value) > 200:
@@ -204,20 +204,33 @@ async def get_customer_decisions(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "find_similar_decisions",
-    "Find structurally similar past decisions using FastRP graph embeddings. Returns decisions with similar patterns of entities, relationships, and outcomes.",
-    {"decision_id": str, "limit": int},
+    """Find structurally similar past decisions using FastRP graph embeddings. 
+    Returns decisions with similar influences, causes, and precidents as well as decisions about related accounts .""",
+    {
+        "decision_id": {
+            "type": str,
+            "description": "The internal decision ID (decision.id)"
+        },
+        "limit": {
+            "type": int,
+            "description": "Number of similar decisions to return",
+            "default": 5
+        }
+    },
 )
 async def find_similar_decisions(args: dict[str, Any]) -> dict[str, Any]:
     """Find similar decisions using FastRP embeddings."""
     try:
-        results = gds_client.find_similar_decisions_knn(
-            decision_id=args["decision_id"], limit=args.get("limit", 5)
-        )
-        # Include graph data centered on the original decision
-        graph_data = get_graph_data_for_entity(args["decision_id"], depth=2)
+        decision_id = args["decision_id"]
+        limit = int(args.get("limit", 10))
+
+        similar_decisions = gds_client.find_similar_decisions(decision_id, limit=limit)
+
+        # Include graph data centered on the decision
+        graph_data = get_graph_data_for_entity(decision_id, depth=2)
 
         response = {
-            "similar_decisions": results,
+            "similar_decisions": similar_decisions,
             "graph_data": graph_data,
         }
         return {"content": [{"type": "text", "text": json.dumps(response, indent=2, default=str)}]}
@@ -346,15 +359,27 @@ async def record_decision(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "detect_fraud_patterns",
-    "Analyze accounts or transactions for potential fraud patterns using graph structure analysis. Uses Node Similarity to compare against known fraud cases.",
-    {"account_id": str, "similarity_threshold": float},
+    """Analyze accounts or transactions for potential fraud patterns using graph structure analysis.
+    Checks an account's proximity to flagged transactions as well as the prevalance of flagged transactions in the community of related accounts.""",
+    {
+        "account_id": {
+            "type": str,
+            "description": "The internal account ID (account.id), not the customer-facing account number (account.account_number)"
+        },
+        "neighbor_count": {
+            "type": int,
+            "description": "Number of example decisions to return from the community",
+            "default": 5
+        }
+    },
 )
 async def detect_fraud_patterns(args: dict[str, Any]) -> dict[str, Any]:
     """Detect fraud patterns using graph analysis."""
     try:
+        neighbor_count = int(args.get("neighbor_count", 5))
         results = gds_client.detect_fraud_patterns(
             account_id=args.get("account_id"),
-            similarity_threshold=args.get("similarity_threshold", 0.7),
+            neighbor_count=neighbor_count,
         )
         return {"content": [{"type": "text", "text": json.dumps(results, indent=2, default=str)}]}
     except Exception as e:
@@ -366,41 +391,33 @@ async def detect_fraud_patterns(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "find_decision_community",
-    "Find decisions in the same community using Louvain community detection. Returns decisions that are structurally related through causal chains and precedent relationships.",
-    {"decision_id": str, "limit": int},
+    "Find decisions in the same community using Leiden community detection. Returns decisions that are structurally related through causal chains and precedent relationships.",
+    {
+        "decision_id": {
+            "type": str,
+            "description": "The internal decision ID (decision.id)"
+        },
+        "example_count": {
+            "type": int,
+            "description": "Number of example decisions to return from the community",
+            "default": 5
+        }
+    },
 )
 async def find_decision_community(args: dict[str, Any]) -> dict[str, Any]:
-    """Find decisions in the same community using Louvain."""
+    """Find decisions in the same community using Leiden."""
+    decision_id = args["decision_id"]
     try:
-        decision_id = args["decision_id"]
-        limit = args.get("limit", 10)
-
-        # Community IDs are computed at app startup via Louvain
-        # Query decisions in the same community
-        with gds_client.driver.session(database=gds_client.database) as session:
-            result = session.run(
-                """
-                MATCH (source:Decision {id: $decision_id})
-                MATCH (other:Decision)
-                WHERE other.community_id = source.community_id AND other.id <> source.id
-                RETURN other.id AS id,
-                       other.decision_type AS decision_type,
-                       other.category AS category,
-                       other.reasoning_summary AS reasoning_summary,
-                       other.decision_timestamp AS decision_timestamp,
-                       other.community_id AS community_id
-                ORDER BY other.decision_timestamp DESC
-                LIMIT $limit
-                """,
-                {"decision_id": decision_id, "limit": limit},
-            )
-            community_decisions = [dict(record) for record in result]
-
+        example_count = int(args.get("example_count", 5))
+        results = gds_client.get_decision_community(
+            decision_id=args["decision_id"], example_count=example_count
+        )
+ 
         # Include graph data centered on the decision
         graph_data = get_graph_data_for_entity(decision_id, depth=2)
 
         response = {
-            "community_decisions": community_decisions,
+            "community_decisions": results,
             "graph_data": graph_data,
         }
         return {"content": [{"type": "text", "text": json.dumps(response, indent=2, default=str)}]}
@@ -410,6 +427,30 @@ async def find_decision_community(args: dict[str, Any]) -> dict[str, Any]:
             "is_error": True,
         }
 
+@tool(
+    "find_accounts_with_high_shared_transaction_volume",
+    "Find accounts that share high transaction volumes with a given account.",
+    {
+        "account_id": {
+            "type": str,
+            "description": "The internal account ID (account.id), not the customer-facing account number (account.account_number)"
+        },
+    },
+)
+async def find_accounts_with_high_shared_transaction_volume(args: dict[str, Any]) -> dict[str, Any]:
+    """Find accounts with high shared transaction volume."""
+    try:
+        results = gds_client.find_accounts_with_high_shared_transaction_volume(
+            account_id=args.get("account_id")
+        )
+
+        return {"content": [{"type": "text", "text": json.dumps(results, indent=2, default=str)}]}
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error finding accounts with high shared transaction volume: {str(e)}"}],
+            "is_error": True,
+        }
+    
 
 @tool(
     "get_policy",
@@ -531,6 +572,7 @@ def create_context_graph_server():
             record_decision,
             detect_fraud_patterns,
             find_decision_community,
+            find_accounts_with_high_shared_transaction_volume,
             get_policy,
             execute_cypher,
             get_schema,
@@ -554,6 +596,7 @@ def get_agent_options() -> ClaudeAgentOptions:
             "mcp__graph__record_decision",
             "mcp__graph__detect_fraud_patterns",
             "mcp__graph__find_decision_community",
+            "mcp__graph__find_accounts_with_high_shared_transaction_volume",
             "mcp__graph__get_policy",
             "mcp__graph__execute_cypher",
             "mcp__graph__get_schema",
@@ -574,6 +617,7 @@ AVAILABLE_TOOLS = [
     "record_decision",
     "detect_fraud_patterns",
     "find_decision_community",
+    "find_accounts_with_high_shared_transaction_volume",
     "get_policy",
     "execute_cypher",
     "get_schema",

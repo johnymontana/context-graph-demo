@@ -30,9 +30,7 @@ from .models import (
     ChatRequest,
     ChatResponse,
     DecisionRequest,
-    GraphData,
-    GraphNode,
-    GraphRelationship,
+    GraphData
 )
 from .vector_client import vector_client
 
@@ -55,49 +53,7 @@ async def lifespan(app: FastAPI):
         if index_results["errors"]:
             logger.warning(f"Index errors: {index_results['errors']}")
 
-        # Generate reasoning embeddings for decisions that don't have them
-        logger.info("Checking decision embeddings...")
-        total_generated = 0
-        while True:
-            try:
-                count = vector_client.batch_update_decision_embeddings(limit=100)
-                if count == 0:
-                    break
-                total_generated += count
-                logger.info(f"Generated embeddings for {count} decisions ({total_generated} total)")
-            except Exception as e:
-                logger.warning(f"Could not generate embeddings: {e}")
-                break
-
-        if total_generated > 0:
-            logger.info(f"Finished generating {total_generated} decision embeddings")
-        else:
-            logger.info("All decisions already have embeddings")
-
-        # Run Louvain community detection to compute community IDs for decisions
-        logger.info("Running Louvain community detection...")
-        try:
-            community_result = gds_client.write_community_ids()
-            if community_result.get("status") == "already_computed":
-                logger.info("Community IDs already computed")
-            elif community_result:
-                logger.info(
-                    f"Community detection complete: {community_result.get('communityCount', 0)} communities found"
-                )
-            else:
-                logger.info("Community detection complete")
-        except Exception as e:
-            logger.warning(f"Could not run community detection: {e}")
-
-        # Run PageRank influence scoring for flagged transactions
-        logger.info("Running flagged transaction influence scoring...")
-        try:
-            pagerank_result = gds_client.calculate_flagged_transaction_influence()
-            logger.info(
-                f"Flagged transaction influence scoring complete: {pagerank_result.properties_written} nodes scored"
-            )
-        except Exception as e:
-            logger.warning(f"Could not run PageRank: {e}")
+        gds_client.refresh_gds_analyses()
 
     else:
         logger.warning("Could not connect to Neo4j")

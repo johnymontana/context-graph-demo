@@ -3,10 +3,13 @@ Neo4j Graph Data Science (GDS) client.
 Implements FastRP, KNN, Node Similarity, Louvain, and PageRank.
 """
 
-from typing import Optional
+from typing import Any
+from venv import logger
 
 from neo4j import GraphDatabase
 from graphdatascience import GraphDataScience
+from graphdatascience.graph.graph_object import Graph
+import logging
 
 from .config import config
 
@@ -26,6 +29,7 @@ class GDSClient:
             auth=(config.neo4j.username, config.neo4j.password),
             database=config.neo4j.database,
         )
+        self.logger = logging.getLogger(__name__)
 
     def close(self):
         self.driver.close()
@@ -35,128 +39,207 @@ class GDSClient:
     # GRAPH PROJECTION MANAGEMENT
     # ============================================
 
-    def create_decision_graph_projection(self, include_embeddings: bool = False) -> dict:
-        """Create the decision graph projection for GDS algorithms.
-
-        Args:
-            include_embeddings: If True, load existing fastrp_embedding properties.
-                              If False, create without embeddings (for generating new ones).
-        """
-        with self.driver.session(database=self.database) as session:
-            # Drop if exists
-            session.run("CALL gds.graph.drop('decision-graph', false) YIELD graphName")
-
-            if include_embeddings:
-                # Load with existing embeddings for KNN queries
-                result = session.run(
-                    """
-                    CALL gds.graph.project(
-                        'decision-graph',
-                        {
-                            Decision: {properties: ['fastrp_embedding']},
-                            Person: {properties: ['fastrp_embedding']},
-                            Account: {properties: ['fastrp_embedding']},
-                            Transaction: {properties: ['fastrp_embedding']},
-                            Organization: {},
-                            Policy: {},
-                            Employee: {}
-                        },
-                        {
-                            ABOUT: {orientation: 'UNDIRECTED'},
-                            CAUSED: {orientation: 'NATURAL', properties: ['confidence']},
-                            INFLUENCED: {orientation: 'NATURAL', properties: ['weight']},
-                            PRECEDENT_FOR: {orientation: 'NATURAL', properties: ['similarity_score']},
-                            OWNS: {orientation: 'UNDIRECTED'},
-                            MADE_BY: {orientation: 'NATURAL'},
-                            APPLIED_POLICY: {orientation: 'NATURAL'},
-                            FROM_ACCOUNT: {orientation: 'NATURAL'},
-                            TO_ACCOUNT: {orientation: 'NATURAL'}
-                        }
-                    ) YIELD graphName, nodeCount, relationshipCount
-                    RETURN graphName, nodeCount, relationshipCount
-                    """
-                )
-            else:
-                # Create without embeddings (for generating new FastRP embeddings)
-                result = session.run(
-                    """
-                    CALL gds.graph.project(
-                        'decision-graph',
-                        ['Decision', 'Person', 'Account', 'Transaction', 'Organization', 'Policy', 'Employee'],
-                        {
-                            ABOUT: {orientation: 'UNDIRECTED'},
-                            CAUSED: {orientation: 'NATURAL', properties: ['confidence']},
-                            INFLUENCED: {orientation: 'NATURAL', properties: ['weight']},
-                            PRECEDENT_FOR: {orientation: 'NATURAL', properties: ['similarity_score']},
-                            OWNS: {orientation: 'UNDIRECTED'},
-                            MADE_BY: {orientation: 'NATURAL'},
-                            APPLIED_POLICY: {orientation: 'NATURAL'},
-                            FROM_ACCOUNT: {orientation: 'NATURAL'},
-                            TO_ACCOUNT: {orientation: 'NATURAL'}
-                        }
-                    ) YIELD graphName, nodeCount, relationshipCount
-                    RETURN graphName, nodeCount, relationshipCount
-                    """
-                )
-            record = result.single()
-            return dict(record) if record else {}
-
-    def create_entity_graph_projection(self) -> dict:
-        """Create the entity graph projection for fraud detection."""
-        with self.driver.session(database=self.database) as session:
-            # Drop if exists
-            session.run("CALL gds.graph.drop('entity-graph', false) YIELD graphName")
-
-            result = session.run(
-                """
-                CALL gds.graph.project(
-                    'entity-graph',
-                    ['Person', 'Account', 'Transaction'],
-                    {
-                        OWNS: {orientation: 'UNDIRECTED'},
-                        FROM_ACCOUNT: {orientation: 'UNDIRECTED'},
-                        TO_ACCOUNT: {orientation: 'UNDIRECTED'}
-                    }
-                ) YIELD graphName, nodeCount, relationshipCount
-                RETURN graphName, nodeCount, relationshipCount
-                """
-            )
-            record = result.single()
-            return dict(record) if record else {}
-        
-    def create_transaction_graph_projection(self) -> dict:
+    def create_transaction_graph_projection(self) -> Graph:
         """Create the transaction graph projection for influence scoring."""
+
         self.gds.graph.drop('transaction-graph', False)
         g_transactions, _ = self.gds.graph.cypher.project(
             """//cypher
+            cypher runtime = parallel
             MATCH (a:Account)
             OPTIONAL MATCH (a)<-[t:FROM_ACCOUNT|TO_ACCOUNT]-(tr:Transaction)
             RETURN gds.graph.project('transaction-graph',
-                tr, a,
+                a, tr,
                 {
                     sourceNodeLabels: ['Transaction'],
                     targetNodeLabels: ['Account'],
-                    relationshipType: 'INFLUENCES_ACCOUNT'
-                },
-                {
-                    undirectedRelationshipTypes: ['INFLUENCES_ACCOUNT']
+                    relationshipType: 'HAS_TRANSACTION',
+                    relationshipProperties: {amount: tr.amount}
                 }
                 )
             """)
+
         return g_transactions
+    
+    def create_account_graph_projection(self) -> Graph:
+        """Create the account graph projection showing accounts that share transactions."""
 
+        self.gds.graph.drop('account-graph', False)
+        g_account, _ = self.gds.graph.cypher.project(
+            """//cypher
+            cypher runtime = parallel
+            MATCH (a1:Account)
+            OPTIONAL MATCH (a1:Account)<-[:FROM_ACCOUNT]-(t)-[:TO_ACCOUNT]->(a2:Account)
+            WITH CASE WHEN a1.id < a2.id OR a2.id IS NULL THEN [a1, a2] ELSE [a2, a1] END AS pair, sum(t.amount) AS amount
+            RETURN gds.graph.project('account-graph',
+                pair[0], pair[1],
+                {
+                    sourceNodeLabels: ['Account'],
+                    targetNodeLabels: ['Account'],
+                    relationshipType: 'SHARE_TRANSACTIONS',
+                    relationshipProperties: {amount: amount}
+                },
+                {
+                    undirectedRelationshipTypes: ['SHARE_TRANSACTIONS']
+                }
+                )
+            """)
+        return g_account
+    
 
-    def list_graph_projections(self) -> list[dict]:
-        """List all graph projections."""
+    def create_decision_graph_projection(self) -> Graph:
+        """Create the decision graph projection for finding similarity between decisions algorithms.
+        """
+
+        self.gds.graph.drop('decision-graph', False)
+        g_decisions, _ = self.gds.graph.cypher.project(
+            """//cypher
+            cypher runtime = parallel
+            CALL () {
+            // Decisions that are direct neighbors
+            MATCH (d1)
+            OPTIONAL MATCH (d1)-[:INFLUENCED|CAUSED|PRECEDENT_FOR]-(d2)
+            WHERE d1 < d2
+            RETURN d1, d2
+
+            UNION 
+            
+            // Decisions about accounts owned by the same entity
+            MATCH (d1:Decision)-[:ABOUT]->()(()-[:OWNS|OWNS_ACCOUNT]->()<-[:OWNS|OWNS_ACCOUNT]-()){0,1}()<-[:ABOUT]-(d2)
+            WHERE d1 < d2
+            RETURN d1, d2
+            
+            UNION 
+            
+            // Decisions about accounts sharing high transaction amounts
+            MATCH (d1:Decision)-[:ABOUT]->()-[:SHARES_HIGH_PERCENTAGE_OF_TRANSACTIONS_WITH]-()<-[:ABOUT]-(d2)
+            WHERE d1 < d2
+            RETURN d1, d2
+            }
+            RETURN gds.graph.project(
+            'decision-graph',
+            d1, d2,
+            {
+                sourceNodeLabels: ['Decision'],
+                targetNodeLabels: ['Decision'],
+                relationshipType: "SHARES_FACTORS"
+            },
+            {
+                undirectedRelationshipTypes: ["SHARES_FACTORS"]
+            }
+            )
+            """)
+        return g_decisions
+
+        
+    # ============================================
+    # RELATED ACCOUNTS VIA NODE SIMILARITY
+    # ============================================
+
+    def find_related_accounts(
+        self,
+    ) ->  Any:
+        """Find accounts that share common transactions."""
+        
         with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.graph.list()
-                YIELD graphName, nodeCount, relationshipCount, creationTime
-                RETURN graphName, nodeCount, relationshipCount, creationTime
+            session.run("""//cypher
+                        MATCH ()-[r:SHARES_HIGH_PERCENTAGE_OF_TRANSACTIONS_WITH]->()
+                        CALL (r)
+                        {
+                            DELETE r
+                        } IN TRANSACTIONS
+                        """)
+
+        g_transactions = self.create_transaction_graph_projection()
+
+        node_similarity_result = self.gds.v2.node_similarity.write(
+            g_transactions,
+            relationship_types = ['HAS_TRANSACTION'],
+            relationship_weight_property = 'amount',
+            top_k = 5,
+            similarity_cutoff = 0.2,
+            write_relationship_type = 'SHARES_HIGH_PERCENTAGE_OF_TRANSACTIONS_WITH',
+            write_property = 'weighted_jaccard_similarity',
+            use_components = True
+        )
+
+        g_transactions.drop()
+        return node_similarity_result
+
+    # ============================================
+    # ACCOUNT COMMUNITIES
+    # ============================================
+    def find_account_communities(
+        self,
+    ) -> Any:
+        """Detect communities of related accounts using Leiden."""
+        #Clean up previous community assignments
+        with self.driver.session(database=self.database) as session:
+            session.run("""//cypher
+                        MATCH (d:Account)
+                        CALL (d)
+                        {
+                        REMOVE d.community_id
+                        } IN CONCURRENT TRANSACTIONS
+                        """)
+            
+            session.run("""//cypher
+                        MATCH ()-[b:BELONGS_TO_ACCOUNT_COMMUNITY]->()
+                        CALL (b)
+                        {
+                            DELETE b
+                        } IN TRANSACTIONS
+                        """)
+            
+            session.run("""//cypher
+                        MATCH (c:AccountCommunity)
+                        CALL (c)
+                        {
+                            DELETE c
+                        } IN CONCURRENT TRANSACTIONS
+                        """)
+        
+        g_accounts = self.create_account_graph_projection()
+
+        leiden_result = self.gds.v2.leiden.write(
+            g_accounts,
+            random_seed = 42,
+            write_property = 'community_id'
+        )
+
+        with self.driver.session(database=self.database) as session:
+            # Create Community nodes and connect them to Account nodes
+            session.run(
+                """//cypher
+                CYPHER 25
+                MATCH (a:Account)
+                WHERE a.community_id IS NOT NULL
+                WITH a.community_id AS communityId, collect(a) AS accounts
+                CALL (communityId, accounts)
+                {
+                    MERGE (c:AccountCommunity {id: communityId})
+                    SET c.account_count = size(accounts),
+                    c.account_types = coll.distinct([d IN accounts | d.account_type])
+                    WITH c, accounts
+                    UNWIND accounts AS a
+                    MERGE (a)-[:BELONGS_TO_ACCOUNT_COMMUNITY]->(c)
+                    WITH c, accounts, avg(a.balance) AS avg_balance,
+                    percentileCont(a.balance, 0.5) AS median_balance
+                    SET c.avg_account_balance = avg_balance,
+                    c.median_account_balance = median_balance
+                    UNWIND accounts AS a
+                    OPTIONAL MATCH (a)<-[:FROM_ACCOUNT|TO_ACCOUNT]-(t:Transaction)
+                    WITH c, count(*) AS transaction_count, SUM(CASE WHEN t.status = 'flagged' THEN 1 ELSE 0 END) AS flagged_count
+                    SET c.total_transactions = transaction_count,
+                    c.flagged_transactions = flagged_count,
+                    c.percent_flagged_transactions = CASE WHEN transaction_count > 0 THEN 1.0 * flagged_count / transaction_count ELSE 0 END
+                } IN CONCURRENT TRANSACTIONS
                 """
             )
-            return [dict(record) for record in result]
+        
+        g_accounts.drop()
+
+        return leiden_result
 
     # ============================================
     # FASTRP EMBEDDINGS
@@ -164,362 +247,165 @@ class GDSClient:
 
     def generate_fastrp_embeddings(
         self,
-        graph_name: str = "decision-graph",
-        node_labels: Optional[list[str]] = None,
-    ) -> dict:
-        """Generate FastRP embeddings for nodes.
-
-        Note: This method expects the graph projection to already exist.
-        It's called internally by _ensure_decision_graph_exists.
+    ) -> Any:
+        """Generate FastRP embeddings for nodes and use them to create similarity relationships.
         """
-        node_labels = node_labels or ["Decision", "Person", "Account", "Transaction"]
 
+        # Drop previously created FastRP embeddings and KNN relationships if they exist
         with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.fastRP.mutate($graph_name, {
-                    embeddingDimension: $dimensions,
-                    iterationWeights: [0.0, 1.0, 1.0, 0.8, 0.6],
-                    normalizationStrength: 0.5,
-                    mutateProperty: 'fastrp_embedding'
-                }) YIELD nodePropertiesWritten, computeMillis
-                RETURN nodePropertiesWritten, computeMillis
-                """,
-                {
-                    "graph_name": graph_name,
-                    "dimensions": self.fastrp_dimensions,
-                },
+            session.run("""//cypher
+                        MATCH (d:Decision)
+                        CALL (d)
+                        {
+                        REMOVE d.fast_rp_embedding
+                        } IN CONCURRENT TRANSACTIONS
+                        """)
+            session.run("""//cypher
+                        MATCH ()-[r:HAS_SIMILAR_FACTORS]->()
+                        CALL (r)
+                        {
+                            DELETE r
+                        } IN TRANSACTIONS
+                        """)
+
+        g_decisions = self.create_decision_graph_projection()
+
+
+        # Calculate FastRP embeddings
+        self.gds.v2.fast_rp.mutate(
+            g_decisions,
+            embedding_dimension = self.fastrp_dimensions,
+            iteration_weights = [0.0, 0.0, 1.0, 1.0],
+            mutate_property = 'fast_rp_embedding'
+        )
+
+        fast_rp_write_result = self.gds.v2.graph.node_properties.write(
+            g_decisions,
+            ['fast_rp_embedding']
+        )
+
+        # Create KNN relationships based on FastRP embeddings
+        knn_write_result = self.gds.v2.knn.write(
+            g_decisions,
+            node_properties = ['fast_rp_embedding'],
+            top_k = 10,
+            similarity_cutoff = 0.6,
+            initial_sampler="randomWalk",
+            write_relationship_type = 'HAS_SIMILAR_FACTORS',
+            write_property = 'fast_rp_cosine_similarity'
             )
-            record = result.single()
-            return dict(record) if record else {}
-
-    def write_fastrp_embeddings(
-        self,
-        graph_name: str = "decision-graph",
-        node_labels: Optional[list[str]] = None,
-    ) -> dict:
-        """Write FastRP embeddings back to the database.
-
-        Note: This method expects the graph projection to already exist with embeddings.
-        It's called internally by _ensure_decision_graph_exists.
-        """
-        node_labels = node_labels or ["Decision", "Person", "Account", "Transaction"]
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.graph.nodeProperties.write($graph_name, ['fastrp_embedding'], $node_labels)
-                YIELD propertiesWritten
-                RETURN propertiesWritten
-                """,
-                {"graph_name": graph_name, "node_labels": node_labels},
-            )
-            record = result.single()
-            return dict(record) if record else {}
-
-    # ============================================
-    # K-NEAREST NEIGHBORS (KNN)
-    # ============================================
-
-    def find_similar_decisions_knn(
-        self,
-        decision_id: str,
-        limit: int = 10,
-        graph_name: str = "decision-graph",
-    ) -> list[dict]:
-        """Find similar decisions using KNN on FastRP embeddings."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.knn.stream($graph_name, {
-                    nodeLabels: ['Decision'],
-                    nodeProperties: ['fastrp_embedding'],
-                    topK: $limit,
-                    sampleRate: 1.0
-                }) YIELD node1, node2, similarity
-                WITH gds.util.asNode(node1) AS decision1, gds.util.asNode(node2) AS decision2, similarity
-                WHERE decision1.id = $decision_id
-                RETURN decision2.id AS id,
-                       decision2.decision_type AS decision_type,
-                       decision2.category AS category,
-                       decision2.reasoning_summary AS reasoning_summary,
-                       decision2.decision_timestamp AS decision_timestamp,
-                       similarity
-                ORDER BY similarity DESC
-                """,
-                {
-                    "graph_name": graph_name,
-                    "decision_id": decision_id,
-                    "limit": limit,
-                },
-            )
-            return [dict(record) for record in result]
-
-    def run_knn_all(
-        self,
-        graph_name: str = "decision-graph",
-        node_label: str = "Decision",
-        top_k: int = 5,
-    ) -> dict:
-        """Run KNN on all nodes and create SIMILAR_TO relationships."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.knn.mutate($graph_name, {
-                    nodeLabels: [$node_label],
-                    nodeProperties: ['fastrp_embedding'],
-                    topK: $top_k,
-                    mutateRelationshipType: 'SIMILAR_TO',
-                    mutateProperty: 'score'
-                }) YIELD relationshipsWritten, computeMillis
-                RETURN relationshipsWritten, computeMillis
-                """,
-                {
-                    "graph_name": graph_name,
-                    "node_label": node_label,
-                    "top_k": top_k,
-                },
-            )
-            record = result.single()
-            return dict(record) if record else {}
-
-    # ============================================
-    # NODE SIMILARITY
-    # ============================================
-
-    def find_similar_accounts(
-        self,
-        account_id: str,
-        limit: int = 10,
-        similarity_cutoff: float = 0.5,
-        graph_name: str = "entity-graph",
-    ) -> list[dict]:
-        """Find accounts with similar neighborhood structures."""
-        # Ensure the graph projection exists
-        if graph_name == "entity-graph":
-            self._ensure_entity_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.nodeSimilarity.stream($graph_name, {
-                    nodeLabels: ['Account'],
-                    topK: $limit,
-                    similarityCutoff: $cutoff
-                }) YIELD node1, node2, similarity
-                WITH gds.util.asNode(node1) AS account1, gds.util.asNode(node2) AS account2, similarity
-                WHERE account1.id = $account_id
-                RETURN account2.id AS id,
-                       account2.account_number AS account_number,
-                       account2.account_type AS account_type,
-                       account2.risk_tier AS risk_tier,
-                       similarity
-                ORDER BY similarity DESC
-                """,
-                {
-                    "graph_name": graph_name,
-                    "account_id": account_id,
-                    "limit": limit,
-                    "cutoff": similarity_cutoff,
-                },
-            )
-            return [dict(record) for record in result]
-
-    def find_potential_duplicates(
-        self,
-        similarity_cutoff: float = 0.7,
-        graph_name: str = "entity-graph",
-    ) -> list[dict]:
-        """Find potential duplicate persons using Node Similarity."""
-        # Ensure the graph projection exists
-        if graph_name == "entity-graph":
-            self._ensure_entity_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.nodeSimilarity.stream($graph_name, {
-                    nodeLabels: ['Person'],
-                    topK: 10,
-                    similarityCutoff: $cutoff
-                }) YIELD node1, node2, similarity
-                WITH gds.util.asNode(node1) AS person1, gds.util.asNode(node2) AS person2, similarity
-                WHERE person1.id < person2.id
-                RETURN person1.id AS person1_id,
-                       person1.name AS person1_name,
-                       person1.source_systems AS person1_sources,
-                       person2.id AS person2_id,
-                       person2.name AS person2_name,
-                       person2.source_systems AS person2_sources,
-                       similarity
-                ORDER BY similarity DESC
-                LIMIT 20
-                """,
-                {"graph_name": graph_name, "cutoff": similarity_cutoff},
-            )
-            return [dict(record) for record in result]
-
-    # ============================================
-    # GRAPH PROJECTION HELPERS
-    # ============================================
-
-    def _check_embeddings_exist(self) -> bool:
-        """Check if fastrp_embedding properties exist on Decision nodes."""
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                MATCH (d:Decision)
-                WHERE d.fastrp_embedding IS NOT NULL
-                RETURN count(d) > 0 AS has_embeddings
-                """
-            )
-            record = result.single()
-            return record["has_embeddings"] if record else False
-
-    def _ensure_decision_graph_exists(self) -> None:
-        """Ensure the decision-graph projection exists with embeddings.
-
-        If embeddings don't exist in the database, this will:
-        1. Create the graph projection without embeddings
-        2. Generate FastRP embeddings
-        3. Write embeddings back to database
-        4. Recreate the graph projection with embeddings
-        """
-        # Check if embeddings exist in database
-        embeddings_exist = self._check_embeddings_exist()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.graph.exists('decision-graph') YIELD exists
-                RETURN exists
-                """
-            )
-            record = result.single()
-            graph_exists = record and record["exists"]
-
-        if graph_exists and embeddings_exist:
-            # Graph exists and embeddings are in database, we're good
-            return
-
-        if embeddings_exist:
-            # Embeddings exist in DB but graph needs to be (re)created with them
-            self.create_decision_graph_projection(include_embeddings=True)
-        else:
-            # No embeddings - need to generate them first
-            # 1. Create graph without embeddings
-            self.create_decision_graph_projection(include_embeddings=False)
-            # 2. Generate FastRP embeddings (mutates in-memory graph)
-            self.generate_fastrp_embeddings()
-            # 3. Write embeddings to database
-            self.write_fastrp_embeddings()
-            # 4. Recreate graph with embeddings loaded
-            self.create_decision_graph_projection(include_embeddings=True)
-
-    def _ensure_entity_graph_exists(self) -> None:
-        """Ensure the entity-graph projection exists, creating it if necessary."""
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.graph.exists('entity-graph') YIELD exists
-                RETURN exists
-                """
-            )
-            record = result.single()
-            if not record or not record["exists"]:
-                self.create_entity_graph_projection()
-
-    # ============================================
-    # FRAUD PATTERN DETECTION
-    # ============================================
-
-    def detect_fraud_patterns(
-        self,
-        account_id: Optional[str] = None,
-        similarity_threshold: float = 0.7,
-        graph_name: str = "entity-graph",
-    ) -> list[dict]:
-        """Detect accounts with similar structures to known fraud cases."""
-        # Ensure the graph projection exists
-        if graph_name == "entity-graph":
-            self._ensure_entity_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            if account_id:
-                # Check specific account against fraud patterns
-                result = session.run(
-                    """
-                    MATCH (target:Account {id: $account_id})
-                    MATCH (fraud:Account)-[:FROM_ACCOUNT|TO_ACCOUNT]-(t:Transaction)
-                    WHERE t.status = 'flagged'
-                    WITH target, fraud, count(t) AS flagged_count
-                    WHERE flagged_count >= 2
-                    CALL gds.nodeSimilarity.stream($graph_name, {
-                        topK: 50,
-                        similarityCutoff: $threshold
-                    }) YIELD node1, node2, similarity
-                    WITH target, fraud, gds.util.asNode(node1) AS a1, gds.util.asNode(node2) AS a2, similarity
-                    WHERE a1:Account AND a2:Account
-                      AND ((a1.id = target.id AND a2.id = fraud.id)
-                        OR (a1.id = fraud.id AND a2.id = target.id))
-                    RETURN DISTINCT target.id AS target_id,
-                           target.account_number AS target_account,
-                           fraud.id AS fraud_case_id,
-                           fraud.account_number AS fraud_account,
-                           similarity AS structural_similarity
-                    ORDER BY similarity DESC
-                    """,
-                    {
-                        "graph_name": graph_name,
-                        "account_id": account_id,
-                        "threshold": similarity_threshold,
-                    },
-                )
-            else:
-                # Find all accounts similar to known fraud cases
-                result = session.run(
-                    """
-                    MATCH (fraud:Account)-[:FROM_ACCOUNT|TO_ACCOUNT]-(t:Transaction)
-                    WHERE t.status = 'flagged'
-                    WITH fraud, count(t) AS flagged_count
-                    WHERE flagged_count >= 2
-                    WITH collect(fraud) AS fraud_accounts
-                    CALL gds.nodeSimilarity.stream($graph_name, {
-                        topK: 100,
-                        similarityCutoff: $threshold
-                    }) YIELD node1, node2, similarity
-                    WITH fraud_accounts, gds.util.asNode(node1) AS a1, gds.util.asNode(node2) AS a2, similarity
-                    WHERE a1:Account AND a2:Account
-                      AND a1 IN fraud_accounts AND NOT a2 IN fraud_accounts
-                    RETURN a2.id AS suspect_id,
-                           a2.account_number AS suspect_account,
-                           a2.risk_tier AS current_risk_tier,
-                           a1.id AS similar_fraud_id,
-                           similarity AS structural_similarity
-                    ORDER BY similarity DESC
-                    LIMIT 20
-                    """,
-                    {"graph_name": graph_name, "threshold": similarity_threshold},
-                )
-            return [dict(record) for record in result]
         
+        # Delete KNN relationships not in same WCC component
+        self.gds.v2.wcc.write(
+            g_decisions,
+            write_property = 'decision_wcc_id')
+        
+        with self.driver.session(database=self.database) as session:
+            delete_result = session.run(
+                """//cypher
+                MATCH (d1:Decision)-[r:HAS_SIMILAR_FACTORS]-(d2:Decision)
+                WHERE d1.decision_wcc_id <> d2.decision_wcc_id
+                CALL (r) {
+                    DELETE r
+                } IN CONCURRENT TRANSACTIONS
+                """)
+            delete_summary = delete_result.consume().counters
+        
+            session.run(
+                """//cypher
+                MATCH (d:Decision)
+                CALL (d) {
+                    REMOVE d.decision_wcc_id
+                } IN CONCURRENT TRANSACTIONS
+                """)
+
+        g_decisions.drop()
+
+        return fast_rp_write_result, knn_write_result, delete_summary
+
+    # ============================================
+    # DECISION COMMUNITY DETECTION
+    # ============================================
+
+    def find_decision_communities(
+        self,
+    ) -> Any:
+        """Detect communities of related decisions using Louvain."""
+        
+        #Clean up previous community assignments
+        with self.driver.session(database=self.database) as session:
+            session.run("""//cypher
+                        MATCH (d:Decision)
+                        CALL (d)
+                        {
+                        REMOVE d.community_id
+                        } IN CONCURRENT TRANSACTIONS
+                        """)
+            
+            session.run("""//cypher
+                        MATCH ()-[b:BELONGS_TO_DECISION_COMMUNITY]->()
+                        CALL (b)
+                        {
+                            DELETE b
+                        } IN TRANSACTIONS
+                        """)
+            
+            session.run("""//cypher
+                        MATCH (c:DecisionCommunity)
+                        CALL (c)
+                        {
+                            DELETE c
+                        } IN CONCURRENT TRANSACTIONS
+                        """)
+        
+        g_decisions = self.create_decision_graph_projection()
+
+        leiden_result = self.gds.v2.leiden.write(
+            g_decisions,
+            random_seed = 42,
+            write_property = 'community_id'
+        )
+
+        with self.driver.session(database=self.database) as session:
+            # Create Community nodes and connect them to Decision nodes
+            session.run(
+                """//cypher
+                CYPHER 25
+                MATCH (d:Decision)
+                WHERE d.community_id IS NOT NULL
+                WITH d.community_id AS communityId, collect(d) AS decisions
+                CALL (communityId, decisions)
+                {
+                    MERGE (c:DecisionCommunity {id: communityId})
+                    SET c.decision_count = size(decisions),
+                    c.categories = coll.distinct([d IN decisions | d.category]),
+                    c.decision_types = coll.distinct([d IN decisions | d.decision_type]),
+                    c.rejection_rate = reduce(rejectCount = 0.0, d in decisions | rejectCount + CASE WHEN d.decision_type = 'rejection' THEN 1.0 ELSE 0.0 END)/size(decisions)
+                    WITH c, decisions
+                    UNWIND decisions AS d
+                    MERGE (d)-[:BELONGS_TO_DECISION_COMMUNITY]->(c)
+                } IN CONCURRENT TRANSACTIONS
+                """
+            )
+        g_decisions.drop()
+
+        return leiden_result
+    
     # ============================================
     # PAGE RANK NODE INFLUENCE SCORING
     # ============================================
     def calculate_flagged_transaction_influence(
         self
-    ) -> None:
+    ) -> Any:
         """Calculate influence scores for accounts showing how much they are influenced by flagged transactions."""
-        # Ensure the graph projection exists
+        # Create graph projection
         g_transactions = self.create_transaction_graph_projection()
+
+        self.gds.v2.graph.relationships.to_undirected(
+            g_transactions,
+            relationship_type = 'HAS_TRANSACTION',
+            mutate_relationship_type = 'UNDIRECTED_HAS_TRANSACTION'
+        )
 
         flagged_node_records, _, _ = self.driver.execute_query(
             """//cypher
@@ -532,6 +418,7 @@ class GDSClient:
 
         self.gds.v2.page_rank.mutate(
             g_transactions,
+            relationship_types = ['UNDIRECTED_HAS_TRANSACTION'],
             source_nodes = flagged_node_ids,
             mutate_property = 'flagged_transaction_influence',
             scaler = 'MinMax'
@@ -547,188 +434,183 @@ class GDSClient:
 
         return write_result
         
+    
+    # ============================================
+    # FULL GDS WORKFLOW
+    # ============================================      
+
+    def refresh_gds_analyses(
+        self,
+    ) -> None:
+        """Run full GDS workflow: 
+            1. Find related accounts via Node Similarity
+            2. Create Leiden communities for accounts
+            3. Generate FastRP embeddings for decisions and create KNN relationships
+            4. Run Leiden community detection to compute community IDs for decisions
+            5. Run PageRank influence scoring for flagged transactions
+        """
+        self.logger.info("Starting GDS analyses refresh...")
+
+        # 1. Find related accounts via Node Similarity
+        self.logger.info("Finding accounts that share transactions...")
+        try:
+            node_similarity_result = self.find_related_accounts()
+            self.logger.info(
+                f"Account similarity computation complete: {node_similarity_result.relationships_written} relationships created"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not compute account similarities: {e}")
+
+        # 2. Create Leiden communities for accounts
+        self.logger.info("Finding account communities...")
+        try:
+            account_communities_result = self.find_account_communities()
+            self.logger.info(
+                f"Account community detection complete: {account_communities_result.community_count} communities found"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not compute account communities: {e}")
+
+        # 3. Generate FastRP embeddings for decisions and create KNN relationships
+        self.logger.info("Running fastRP embedding generation...")
+        try:
+            fast_rp_result, knn_result, delete_summary = self.generate_fastrp_embeddings()
+            self.logger.info(
+                f"FastRP embedding generation complete: {fast_rp_result.properties_written} nodes embedded"
+                f"; {knn_result.relationships_written} similarity relationships created; {delete_summary.relationships_deleted} relationships deleted."
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not run FastRP: {e}")
+
+        # 4. Run Leiden community detection to compute community IDs for decisions
+        self.logger.info("Running decision community detection...")
+        try:
+            decision_communities_result = self.find_decision_communities()
+            self.logger.info(
+                f"Decision community detection complete: {decision_communities_result.community_count} communities found"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not compute decision communities: {e}")
+
+        # 5. Run PageRank influence scoring for flagged transactions
+        self.logger.info("Running flagged transaction influence scoring...")
+        try:
+            pagerank_result = self.calculate_flagged_transaction_influence()
+            self.logger.info(
+                f"Flagged transaction influence scoring complete: {pagerank_result.properties_written} nodes scored"
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not run PageRank: {e}")
+
+        self.logger.info("GDS analyses refresh complete!")
 
     # ============================================
-    # LOUVAIN COMMUNITY DETECTION
-    # ============================================
+    # RETURN GDS-BASED RESULTS
+    # ============================================  
 
-    def detect_decision_communities(
-        self,
-        graph_name: str = "decision-graph",
-    ) -> list[dict]:
-        """Detect communities of related decisions using Louvain."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
+    def find_similar_decisions(self, decision_id: str, limit: int =10) -> list[dict[str, Any]]:
+        """Get decisions similar to the given decision based on FastRP embeddings."""
+        records, _, _ = self.driver.execute_query(
+            """//cypher
+            MATCH (d:Decision {id: $decision_id})-[s:HAS_SIMILAR_FACTORS]->(decision2)
+            RETURN decision2.id AS id,
+            decision2.decision_type AS decision_type,
+            decision2.category AS category,
+            decision2.reasoning_summary AS reasoning_summary,
+            decision2.decision_timestamp AS decision_timestamp,
+            s.fast_rp_cosine_similarity AS fast_rp_cosine_similarity
+            ORDER BY fast_rp_cosine_similarity DESC
+            LIMIT $limit
+            """,
+            {"decision_id": decision_id, "limit": limit},
+        )
+    
+        similar_decisions = [dict(record) for record in records]
 
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.louvain.stream($graph_name, {
-                    nodeLabels: ['Decision'],
-                    relationshipTypes: ['CAUSED', 'INFLUENCED', 'PRECEDENT_FOR']
-                }) YIELD nodeId, communityId
-                WITH gds.util.asNode(nodeId) AS decision, communityId
-                WITH communityId,
-                     count(decision) AS decision_count,
-                     collect(DISTINCT decision.decision_type) AS decision_types,
-                     collect(DISTINCT decision.category) AS categories,
-                     collect(decision.id)[0..5] AS sample_decision_ids
-                ORDER BY decision_count DESC
-                LIMIT 20
-                RETURN communityId, decision_count, decision_types, categories, sample_decision_ids
-                """,
-                {"graph_name": graph_name},
-            )
-            return [dict(record) for record in result]
+        return similar_decisions
+    
+    def get_decision_community(self, decision_id: str, example_count: int) -> dict[str, Any]:
+        """Get information about the decision community for a given decision."""
+        records, _, _ = self.driver.execute_query(
+            """//cypher
+            MATCH (d:Decision {id:$decision_id})
+            OPTIONAL MATCH (d)-[:BELONGS_TO_DECISION_COMMUNITY]->(c)
+            RETURN 
+            c.decision_types AS community_decision_types,
+            c.categories AS community_categories,
+            c.decision_count AS community_decision_count,
+            c.rejection_rate AS community_rejection_rate,
+            COLLECT {
+                MATCH (c)<-[:BELONGS_TO_DECISION_COMMUNITY]-(n)
+                WHERE n <> d
+                RETURN
+                n{.decision_type, .category, .status, .reasoning_summary, .decision_timestamp}
+                ORDER BY vector.similarity.cosine(n.fast_rp_embedding, d.fast_rp_embedding) DESC
+                LIMIT $example_count
+            } AS sample_community_decisions
+            """,
+            {"decision_id": decision_id, "example_count": example_count},
+        )
+    
+        community_info = dict(records[0]) if records else {}
 
-    def write_community_ids(
-        self,
-        graph_name: str = "decision-graph",
-        force: bool = False,
-    ) -> dict:
-        """Write community IDs to decision nodes."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
+        return community_info
+    
 
-        with self.driver.session(database=self.database) as session:
-            # Check if Community nodes already exist in the database
-            if not force:
-                community_check = session.run("MATCH (c:Community) RETURN count(c) > 0 AS exists")
-                community_record = community_check.single()
-                if community_record and community_record["exists"]:
-                    # Communities already created, return early
-                    return {"communityCount": 0, "status": "already_computed"}
+    def detect_fraud_patterns(self, account_id: str, neighbor_count: int =5) -> dict[str, Any]:
+        """Analyze accounts or transactions for potential fraud patterns using graph structure analysis.
+        Checks an account's proximity to flagged transactions as well as the prevalance of flagged transactions in the community of related accounts.
+        """
+        records, _, _ = self.driver.execute_query(
+            """//cypher
+            MATCH (a:Account {id:$account_id})
+            OPTIONAL MATCH (a)-[:BELONGS_TO_ACCOUNT_COMMUNITY]->(c)
+            CALL (a) {
+            MATCH (a)<-[:FROM_ACCOUNT|TO_ACCOUNT]-(t)
+            RETURN count(*) AS account_related_transaction_count,
+            sum(CASE WHEN t.status='flagged' THEN 1 ELSE 0 END) AS account_flagged_transaction_count
+            }
+            RETURN 
+            a.flagged_transaction_influence AS account_flagged_transaction_influence_score,
+            account_related_transaction_count,
+            account_flagged_transaction_count,
+            c.percent_flagged_transactions AS community_percent_flagged_transactions,
+            COLLECT {
+            MATCH (c)<-[:BELONGS_TO_ACCOUNT_COMMUNITY]-(n)
+            WHERE n <> a
+            WITH n, COUNT {(n)<-[:FROM_ACCOUNT|TO_ACCOUNT]-({status:"flagged"})} AS flagged_transaction_count
+            WHERE flagged_transaction_count > 0
+            RETURN {account_id: n.id, flagged_transaction_count: flagged_transaction_count}
+            ORDER BY flagged_transaction_count DESC 
+            LIMIT $neighbor_count
+            } AS community_accounts_with_most_flagged_transactions
+            """,
+            {"account_id": account_id, "neighbor_count": neighbor_count},
+        )
+    
+        fraud_analysis = dict(records[0]) if records else {}
 
-            # Drop and recreate the graph projection to ensure clean state for Louvain
-            session.run(
-                "CALL gds.graph.drop($graph_name, false)",
-                {"graph_name": graph_name},
-            )
-            self._ensure_decision_graph_exists()
+        return fraud_analysis
+    
+    def find_accounts_with_high_shared_transaction_volume(self, account_id: str) -> list[dict[str, Any]]:
+        """Get accounts with high shared transaction volume."""
+        records, _, _ = self.driver.execute_query(
+            """//cypher
+            MATCH (a:Account {id: $account_id})-[s:SHARES_HIGH_PERCENTAGE_OF_TRANSACTIONS_WITH]->(other_account)
+            RETURN other_account.id AS id,
+            other_account.account_number AS account_number,
+            other_account.account_type AS account_type,
+            other_account.status AS status,
+            COLLECT { MATCH (other_account)<-[:OWNS|OWNS_ACCOUNT]-(owner) RETURN owner.name } AS owners,
+            s.weighted_jaccard_similarity AS percentage_of_shared_transactions
+            ORDER BY percentage_of_shared_transactions DESC
+            """,
+            {"account_id": account_id},
+        )
+    
+        related_accounts = [dict(record) for record in records]
 
-            result = session.run(
-                """
-                CALL gds.louvain.mutate($graph_name, {
-                    nodeLabels: ['Decision'],
-                    relationshipTypes: ['CAUSED', 'INFLUENCED', 'PRECEDENT_FOR'],
-                    mutateProperty: 'community_id'
-                }) YIELD communityCount, modularity, computeMillis
-                RETURN communityCount, modularity, computeMillis
-                """,
-                {"graph_name": graph_name},
-            )
-            record = result.single()
-            louvain_result = dict(record) if record else {}
-
-            # Write community IDs back to actual Decision nodes in Neo4j
-            session.run(
-                """
-                CALL gds.graph.nodeProperty.stream($graph_name, 'community_id')
-                YIELD nodeId, propertyValue
-                WITH gds.util.asNode(nodeId) AS decision, propertyValue AS communityId
-                WHERE decision:Decision
-                SET decision.community_id = toInteger(communityId)
-                """,
-                {"graph_name": graph_name},
-            )
-
-            # Create Community nodes and connect them to Decision nodes
-            session.run(
-                """
-                MATCH (d:Decision)
-                WHERE d.community_id IS NOT NULL
-                WITH DISTINCT d.community_id AS communityId
-                MERGE (c:Community {id: communityId})
-                SET c.name = 'Community ' + toString(communityId)
-                """
-            )
-
-            # Create BELONGS_TO relationships from Decisions to Communities
-            session.run(
-                """
-                MATCH (d:Decision)
-                WHERE d.community_id IS NOT NULL
-                MATCH (c:Community {id: d.community_id})
-                MERGE (d)-[:BELONGS_TO]->(c)
-                """
-            )
-
-            # Update Community nodes with aggregated info
-            session.run(
-                """
-                MATCH (c:Community)<-[:BELONGS_TO]-(d:Decision)
-                WITH c, count(d) AS decisionCount,
-                     collect(DISTINCT d.category) AS categories,
-                     collect(DISTINCT d.decision_type) AS decisionTypes
-                SET c.decision_count = decisionCount,
-                    c.categories = categories,
-                    c.decision_types = decisionTypes
-                """
-            )
-
-            return louvain_result
-
-    # ============================================
-    # PAGERANK - INFLUENCE SCORING
-    # ============================================
-
-    def calculate_influence_scores(
-        self,
-        graph_name: str = "decision-graph",
-    ) -> list[dict]:
-        """Calculate PageRank influence scores for decisions."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
-
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.pageRank.stream($graph_name, {
-                    nodeLabels: ['Decision'],
-                    relationshipTypes: ['CAUSED', 'INFLUENCED'],
-                    maxIterations: 20,
-                    dampingFactor: 0.85
-                }) YIELD nodeId, score
-                WITH gds.util.asNode(nodeId) AS decision, score
-                WHERE decision.decision_type IN ['exception', 'override', 'escalation']
-                RETURN decision.id AS id,
-                       decision.decision_type AS decision_type,
-                       decision.category AS category,
-                       decision.reasoning_summary AS reasoning_summary,
-                       score AS influence_score
-                ORDER BY score DESC
-                LIMIT 20
-                """,
-                {"graph_name": graph_name},
-            )
-            return [dict(record) for record in result]
-
-    def write_influence_scores(
-        self,
-        graph_name: str = "decision-graph",
-    ) -> dict:
-        """Write PageRank scores to decision nodes."""
-        # Ensure the graph projection exists
-        if graph_name == "decision-graph":
-            self._ensure_decision_graph_exists()
-        with self.driver.session(database=self.database) as session:
-            result = session.run(
-                """
-                CALL gds.pageRank.mutate($graph_name, {
-                    nodeLabels: ['Decision'],
-                    relationshipTypes: ['CAUSED', 'INFLUENCED'],
-                    mutateProperty: 'influence_score'
-                }) YIELD nodePropertiesWritten, computeMillis
-                RETURN nodePropertiesWritten, computeMillis
-                """,
-                {"graph_name": graph_name},
-            )
-            record = result.single()
-            return dict(record) if record else {}
-
+        return related_accounts
 
 # Singleton instance
 gds_client = GDSClient()
