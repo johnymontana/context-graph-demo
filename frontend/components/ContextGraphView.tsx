@@ -434,7 +434,9 @@ export function ContextGraphView({
                 <VStack align="stretch" gap={1}>
                   {Object.entries(
                     (selectedElement.data as GraphNode).properties,
-                  ).map(([key, value]) => (
+                  )
+                    .filter(([key]) => key !== "fast_rp_embedding")
+                    .map(([key, value]) => (
                     <Box
                       key={key}
                       bg="bg.subtle"
