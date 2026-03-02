@@ -183,6 +183,35 @@ npm run dev
 
 Frontend runs at http://localhost:3000
 
+## Deploying in multihomed environments
+
+When deploying to a multihomed environment, such as a cloud virtual machine, you will need to make a couple of changes. Open the file backend/app/main.py in your favorite text editor and locate the following code:
+
+```
+# CORS middleware for frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "https://context-graph-demo.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+```
+
+Change the URL "https://context-graph-demo.vercel.app" to reflect the public IP and port (3000) you use to access the frontend. If your backend is running, stop and restart it to pick up the change.
+
+The second thing you will need to do is to set an environment variable before starting the frontend. You should set the variable NEXT_PUBLIC_API_URL to the public URL (including host and port) for the backend:
+
+```
+export NEXT_PUBLIC_API_URL="http://<public ip>:8000"
+```
+
 ## Using Neo4j AuraDS (Recommended)
 
 For the best experience with GDS algorithms:
