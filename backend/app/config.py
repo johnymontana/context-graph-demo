@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from pydantic import SecretStr
 
 load_dotenv()
 
@@ -90,3 +91,32 @@ class AppConfig:
 
 # Global config instance
 config = AppConfig.from_env()
+
+
+def get_memory_settings():
+    """
+    Create MemorySettings for neo4j-agent-memory package.
+    Lazy import to avoid circular dependencies.
+    """
+    from neo4j_agent_memory import (
+        EmbeddingConfig,
+        EmbeddingProvider,
+        MemorySettings,
+    )
+    from neo4j_agent_memory import (
+        Neo4jConfig as NAMNeo4jConfig,
+    )
+
+    return MemorySettings(
+        neo4j=NAMNeo4jConfig(
+            uri=config.neo4j.uri,
+            username=config.neo4j.username,
+            password=SecretStr(config.neo4j.password),
+            database=config.neo4j.database,
+        ),
+        embedding=EmbeddingConfig(
+            provider=EmbeddingProvider.OPENAI,
+            model=config.openai.embedding_model,
+            api_key=SecretStr(config.openai.api_key) if config.openai.api_key else None,
+        ),
+    )

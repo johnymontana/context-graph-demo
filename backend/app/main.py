@@ -26,6 +26,7 @@ from .agent import ContextGraphAgent
 from .config import config
 from .context_graph_client import context_graph_client
 from .gds_client import gds_client
+from .memory_client import close_memory_client, init_memory_client
 from .models import (
     ChatRequest,
     ChatResponse,
@@ -40,6 +41,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     logger.info("Starting Context Graph API...")
+
+    # Initialize neo4j-agent-memory client
+    logger.info("Initializing neo4j-agent-memory client...")
+    try:
+        await init_memory_client()
+        logger.info("Memory client initialized successfully!")
+    except Exception as e:
+        logger.warning(f"Could not initialize memory client: {e}")
+
     if context_graph_client.verify_connectivity():
         logger.info("Connected to Neo4j successfully!")
 
@@ -60,6 +70,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down Context Graph API...")
+    await close_memory_client()
     context_graph_client.close()
     gds_client.close()
     vector_client.close()
@@ -124,7 +135,7 @@ async def chat(request: ChatRequest):
         ]
 
         logger.info("Creating ContextGraphAgent...")
-        async with ContextGraphAgent() as agent:
+        async with ContextGraphAgent(session_id=session_id) as agent:
             logger.info("Agent connected, sending query...")
             result = await agent.query(request.message, conversation_history=history)
             logger.info("Query completed successfully")
@@ -159,7 +170,7 @@ async def chat_stream(request: ChatRequest):
             ]
 
             logger.info("Creating ContextGraphAgent for streaming...")
-            async with ContextGraphAgent() as agent:
+            async with ContextGraphAgent(session_id=session_id) as agent:
                 logger.info("Agent connected, starting stream...")
 
                 # Use an async queue to enable keep-alive pings during long operations

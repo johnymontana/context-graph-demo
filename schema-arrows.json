@@ -1,0 +1,596 @@
+{
+  "graph": {
+    "style": {
+      "font-family": "sans-serif",
+      "background-color": "#ffffff",
+      "background-image": "",
+      "background-size": "100%",
+      "node-color": "#4C8EDA",
+      "border-width": 2,
+      "border-color": "#2870c2",
+      "radius": 50,
+      "node-padding": 5,
+      "node-margin": 2,
+      "outside-position": "auto",
+      "node-icon-image": "",
+      "node-background-image": "",
+      "icon-position": "inside",
+      "icon-size": 64,
+      "caption-position": "inside",
+      "caption-max-width": 200,
+      "caption-color": "#ffffff",
+      "caption-font-size": 14,
+      "caption-font-weight": "normal",
+      "label-position": "inside",
+      "label-display": "pill",
+      "label-color": "#ffffff",
+      "label-background-color": "#2870c2",
+      "label-border-color": "#2870c2",
+      "label-border-width": 4,
+      "label-font-size": 14,
+      "label-padding": 5,
+      "label-margin": 4,
+      "directionality": "directed",
+      "detail-position": "inline",
+      "detail-orientation": "parallel",
+      "arrow-width": 3,
+      "arrow-color": "#848484",
+      "margin-start": 5,
+      "margin-end": 5,
+      "margin-peer": 20,
+      "attachment-start": "normal",
+      "attachment-end": "normal",
+      "relationship-icon-image": "",
+      "type-color": "#848484",
+      "type-background-color": "#ffffff",
+      "type-border-color": "#848484",
+      "type-border-width": 0,
+      "type-font-size": 12,
+      "type-padding": 5,
+      "property-position": "outside",
+      "property-alignment": "colon",
+      "property-color": "#848484",
+      "property-font-size": 12,
+      "property-font-weight": "normal"
+    },
+    "nodes": [
+      {
+        "id": "n0",
+        "position": { "x": 0, "y": 0 },
+        "caption": "",
+        "labels": ["Person"],
+        "properties": {
+          "id": "string",
+          "name": "string",
+          "email": "string",
+          "risk_score": "float"
+        },
+        "style": {
+          "node-color": "#4299E1"
+        }
+      },
+      {
+        "id": "n1",
+        "position": { "x": 250, "y": -100 },
+        "caption": "",
+        "labels": ["Account"],
+        "properties": {
+          "id": "string",
+          "account_number": "string",
+          "account_type": "string",
+          "status": "string",
+          "balance": "float"
+        },
+        "style": {
+          "node-color": "#48BB78"
+        }
+      },
+      {
+        "id": "n2",
+        "position": { "x": 500, "y": -100 },
+        "caption": "",
+        "labels": ["Transaction"],
+        "properties": {
+          "id": "string",
+          "type": "string",
+          "amount": "float",
+          "status": "string",
+          "timestamp": "datetime"
+        },
+        "style": {
+          "node-color": "#ED8936"
+        }
+      },
+      {
+        "id": "n3",
+        "position": { "x": 250, "y": 150 },
+        "caption": "",
+        "labels": ["Organization"],
+        "properties": {
+          "id": "string",
+          "name": "string",
+          "type": "string",
+          "risk_rating": "string"
+        },
+        "style": {
+          "node-color": "#F56565"
+        }
+      },
+      {
+        "id": "n4",
+        "position": { "x": 0, "y": 250 },
+        "caption": "",
+        "labels": ["Employee"],
+        "properties": {
+          "id": "string",
+          "name": "string",
+          "department": "string",
+          "role": "string",
+          "authorization_level": "int"
+        },
+        "style": {
+          "node-color": "#63B3ED"
+        }
+      },
+      {
+        "id": "n5",
+        "position": { "x": -300, "y": 0 },
+        "caption": "",
+        "labels": ["Decision"],
+        "properties": {
+          "id": "string",
+          "decision_type": "string",
+          "category": "string",
+          "reasoning": "string",
+          "confidence_score": "float",
+          "decision_timestamp": "datetime"
+        },
+        "style": {
+          "node-color": "#9F7AEA",
+          "radius": 60
+        }
+      },
+      {
+        "id": "n6",
+        "position": { "x": -550, "y": -150 },
+        "caption": "",
+        "labels": ["Policy"],
+        "properties": {
+          "id": "string",
+          "name": "string",
+          "category": "string",
+          "threshold_rules": "json"
+        },
+        "style": {
+          "node-color": "#38B2AC"
+        }
+      },
+      {
+        "id": "n7",
+        "position": { "x": -550, "y": 50 },
+        "caption": "",
+        "labels": ["Exception"],
+        "properties": {
+          "id": "string",
+          "exception_type": "string",
+          "justification": "string",
+          "expiry_date": "datetime"
+        },
+        "style": {
+          "node-color": "#D69E2E"
+        }
+      },
+      {
+        "id": "n8",
+        "position": { "x": -550, "y": 200 },
+        "caption": "",
+        "labels": ["Escalation"],
+        "properties": {
+          "id": "string",
+          "escalation_level": "int",
+          "reason": "string",
+          "urgency": "string"
+        },
+        "style": {
+          "node-color": "#805AD5"
+        }
+      },
+      {
+        "id": "n9",
+        "position": { "x": -300, "y": -200 },
+        "caption": "",
+        "labels": ["DecisionContext"],
+        "properties": {
+          "id": "string",
+          "context_type": "string",
+          "state_snapshot": "json"
+        },
+        "style": {
+          "node-color": "#B794F4"
+        }
+      },
+      {
+        "id": "n10",
+        "position": { "x": -300, "y": 250 },
+        "caption": "",
+        "labels": ["Precedent"],
+        "properties": {
+          "id": "string",
+          "description": "string",
+          "outcome": "string"
+        },
+        "style": {
+          "node-color": "#F687B3"
+        }
+      },
+      {
+        "id": "n11",
+        "position": { "x": 500, "y": 100 },
+        "caption": "",
+        "labels": ["SupportTicket"],
+        "properties": {
+          "id": "string",
+          "category": "string",
+          "priority": "string",
+          "status": "string"
+        },
+        "style": {
+          "node-color": "#3182CE"
+        }
+      },
+      {
+        "id": "n12",
+        "position": { "x": 500, "y": 250 },
+        "caption": "",
+        "labels": ["Alert"],
+        "properties": {
+          "id": "string",
+          "alert_type": "string",
+          "severity": "string",
+          "status": "string"
+        },
+        "style": {
+          "node-color": "#ECC94B"
+        }
+      },
+      {
+        "id": "n13",
+        "position": { "x": -100, "y": -250 },
+        "caption": "",
+        "labels": ["AgentSession"],
+        "properties": {
+          "id": "string",
+          "session_type": "string",
+          "decisions_made": "int"
+        },
+        "style": {
+          "node-color": "#667EEA"
+        }
+      },
+      {
+        "id": "n14",
+        "position": { "x": 100, "y": -250 },
+        "caption": "",
+        "labels": ["Message"],
+        "properties": {
+          "id": "string",
+          "role": "string",
+          "content": "string"
+        },
+        "style": {
+          "node-color": "#A0AEC0"
+        }
+      },
+      {
+        "id": "n15",
+        "position": { "x": -550, "y": -300 },
+        "caption": "",
+        "labels": ["Community"],
+        "properties": {
+          "id": "int",
+          "name": "string",
+          "decision_count": "int",
+          "categories": "list"
+        },
+        "style": {
+          "node-color": "#DD6B20"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "id": "r0",
+        "type": "OWNS",
+        "fromId": "n0",
+        "toId": "n1",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r1",
+        "type": "WORKS_FOR",
+        "fromId": "n0",
+        "toId": "n3",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r2",
+        "type": "RELATED_TO",
+        "fromId": "n0",
+        "toId": "n0",
+        "properties": {
+          "relationship_type": "string"
+        },
+        "style": {}
+      },
+      {
+        "id": "r3",
+        "type": "HELD_AT",
+        "fromId": "n1",
+        "toId": "n3",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r4",
+        "type": "FROM_ACCOUNT",
+        "fromId": "n2",
+        "toId": "n1",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r5",
+        "type": "TO_ACCOUNT",
+        "fromId": "n2",
+        "toId": "n1",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r6",
+        "type": "INVOLVING",
+        "fromId": "n2",
+        "toId": "n3",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r7",
+        "type": "WORKS_IN",
+        "fromId": "n4",
+        "toId": "n3",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r8",
+        "type": "ABOUT",
+        "fromId": "n5",
+        "toId": "n0",
+        "properties": {},
+        "style": {
+          "arrow-color": "#9F7AEA"
+        }
+      },
+      {
+        "id": "r9",
+        "type": "ABOUT",
+        "fromId": "n5",
+        "toId": "n1",
+        "properties": {},
+        "style": {
+          "arrow-color": "#9F7AEA"
+        }
+      },
+      {
+        "id": "r10",
+        "type": "ABOUT",
+        "fromId": "n5",
+        "toId": "n2",
+        "properties": {},
+        "style": {
+          "arrow-color": "#9F7AEA"
+        }
+      },
+      {
+        "id": "r11",
+        "type": "MADE_BY",
+        "fromId": "n5",
+        "toId": "n4",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r12",
+        "type": "MADE_BY",
+        "fromId": "n5",
+        "toId": "n13",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r13",
+        "type": "CAUSED",
+        "fromId": "n5",
+        "toId": "n5",
+        "properties": {
+          "causation_type": "string",
+          "confidence": "float"
+        },
+        "style": {
+          "arrow-color": "#E53E3E"
+        }
+      },
+      {
+        "id": "r14",
+        "type": "INFLUENCED",
+        "fromId": "n5",
+        "toId": "n5",
+        "properties": {
+          "influence_type": "string",
+          "weight": "float"
+        },
+        "style": {
+          "arrow-color": "#D69E2E"
+        }
+      },
+      {
+        "id": "r15",
+        "type": "PRECEDENT_FOR",
+        "fromId": "n5",
+        "toId": "n5",
+        "properties": {
+          "similarity_score": "float"
+        },
+        "style": {
+          "arrow-color": "#38A169"
+        }
+      },
+      {
+        "id": "r16",
+        "type": "APPLIED_POLICY",
+        "fromId": "n5",
+        "toId": "n6",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r17",
+        "type": "GRANTED_EXCEPTION",
+        "fromId": "n5",
+        "toId": "n7",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r18",
+        "type": "TRIGGERED",
+        "fromId": "n5",
+        "toId": "n8",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r19",
+        "type": "HAD_CONTEXT",
+        "fromId": "n5",
+        "toId": "n9",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r20",
+        "type": "FOLLOWED_PRECEDENT",
+        "fromId": "n5",
+        "toId": "n10",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r21",
+        "type": "RAISED_BY",
+        "fromId": "n11",
+        "toId": "n0",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r22",
+        "type": "REGARDING",
+        "fromId": "n11",
+        "toId": "n1",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r23",
+        "type": "HANDLED_BY",
+        "fromId": "n11",
+        "toId": "n4",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r24",
+        "type": "RESULTED_IN",
+        "fromId": "n11",
+        "toId": "n5",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r25",
+        "type": "REGARDING",
+        "fromId": "n12",
+        "toId": "n0",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r26",
+        "type": "REGARDING",
+        "fromId": "n12",
+        "toId": "n2",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r27",
+        "type": "TRIGGERED",
+        "fromId": "n12",
+        "toId": "n5",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r28",
+        "type": "HAS_MESSAGE",
+        "fromId": "n13",
+        "toId": "n14",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r29",
+        "type": "NEXT_MESSAGE",
+        "fromId": "n14",
+        "toId": "n14",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r30",
+        "type": "MADE_DECISION",
+        "fromId": "n14",
+        "toId": "n5",
+        "properties": {},
+        "style": {}
+      },
+      {
+        "id": "r31",
+        "type": "SAME_AS",
+        "fromId": "n0",
+        "toId": "n0",
+        "properties": {
+          "confidence": "float",
+          "resolution_method": "string"
+        },
+        "style": {
+          "arrow-color": "#718096"
+        }
+      },
+      {
+        "id": "r32",
+        "type": "BELONGS_TO",
+        "fromId": "n5",
+        "toId": "n15",
+        "properties": {},
+        "style": {
+          "arrow-color": "#DD6B20"
+        }
+      }
+    ]
+  }
+}

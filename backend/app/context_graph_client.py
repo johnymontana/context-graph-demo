@@ -1,6 +1,10 @@
 """
 Neo4j client for context graph operations.
 Handles entities, decisions, and causal relationships.
+
+Note: This client is being migrated to use neo4j-agent-memory for memory operations.
+Some operations now delegate to memory_client, while graph visualization and
+domain-specific queries remain here.
 """
 
 import uuid
