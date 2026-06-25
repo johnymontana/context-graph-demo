@@ -168,7 +168,7 @@ This creates:
 cd backend
 source .venv/bin/activate
 export $(grep -v '^#' ../.env | xargs)
-uvicorn app.main:app --port 8000
+uvicorn app.main:app --port 8000 --host 0.0.0.0
 ```
 
 Backend runs at http://localhost:8000
