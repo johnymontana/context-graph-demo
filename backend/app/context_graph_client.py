@@ -758,8 +758,10 @@ class ContextGraphClient:
             raise ValueError("Only read operations are allowed")
 
         with self.driver.session(database=self.database) as session:
-            result = session.run(cypher, parameters or {})
-            return [dict(record) for record in result]
+            return session.execute_read(
+                lambda tx: [dict(record)
+                            for record in tx.run(cypher, parameters or {})]
+            )
 
     def get_schema(self) -> dict[str, Any]:
         """Get the graph database schema including node labels, relationship types, and properties."""
